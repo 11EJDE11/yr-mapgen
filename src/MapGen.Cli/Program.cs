@@ -143,7 +143,7 @@ internal static class Program
         Console.WriteLine("yr-mapgen generate [--config settings.json] [--format 1v1|2v2|3v3|4v4|2v2v2v2] [--style standard|blitz]");
         Console.WriteLine("                   [--size small|medium|large] [--theater temperate|snow|urban|newurban|desert|lunar]");
         Console.WriteLine("                   [--resources low|medium|high|veryhigh] [--gems none|perplayer|contested|both]");
-        Console.WriteLine("                   [--economy ore|oilonly|mixed] [--terrain flat|cliffs] [--symmetry rotate180|mirrorleftright|mirrortopbottom|quad|diamond|none]");
+        Console.WriteLine("                   [--economy ore|oilonly|mixed] [--hills|--cliffs|--water 0..1] [--symmetry rotate180|mirrorleftright|mirrortopbottom|quad|diamond|none]");
         Console.WriteLine("                   [--trees 0..1] [--time day|dusk|night] [--seed N] [--count N] [--out path]");
         Console.WriteLine("                   [--game <YR directory>]   (renders the embedded preview with LightningMap)");
     }

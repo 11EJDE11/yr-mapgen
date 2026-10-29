@@ -1,0 +1,13 @@
+YR Map Generator - credits
+
+World-Altering Editor (WAE) by Rampastring
+  https://github.com/Rampastring
+  https://github.com/CnCNet/WorldAlteringEditor
+
+  Used in this generator:
+  - The connected-tile planner (cliffs and shores), ported
+  - Corner-height terrain levelling, after WAE's CornerHeightField
+  - The MiniLZO and Format80 codecs
+  - WAE's Yuri's Revenge configuration from the CnCNet YR client (the .ini files in data\)
+
+WAE is licensed under GPL-3.0, so this generator is GPL-3.0 as well.

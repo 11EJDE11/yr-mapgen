@@ -24,6 +24,7 @@
   <ItemGroup>
     <!-- Theater data and the connected-tile config travel with the exe. -->
     <Content Include="..\..\data\*.json;..\..\data\*.ini" Link="data\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
+    <Content Include="..\..\credits.txt" Link="credits.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
   </ItemGroup>
 
 </Project>
