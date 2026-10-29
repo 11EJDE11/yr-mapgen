@@ -1,0 +1,7 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/MapGen.App/MapGen.App.csproj" />
+    <Project Path="src/MapGen.Cli/MapGen.Cli.csproj" />
+    <Project Path="src/MapGen/MapGen.csproj" />
+  </Folder>
+</Solution>

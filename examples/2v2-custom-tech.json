@@ -1,0 +1,20 @@
+{
+  // Every field is optional; omitted ones use the defaults shown in GeneratorSettings.cs.
+  "Seed": 2026,
+  "Theater": "SNOW",
+  "Format": "TwoVsTwo",
+  "Style": "Standard",
+  "Size": "Medium",
+  "Resources": "Medium",
+  "Gems": "PerPlayer",
+  "Economy": "Ore",
+  "Terrain": "Cliffs",
+  "Time": "Day",
+  "Trees": 0.4,
+  "Tech": [
+    { "Type": "oil", "Placement": "PerPlayer", "Count": 1, "MinDistance": 8, "MaxDistance": 14 },
+    { "Type": "repair", "Placement": "PerTeam", "Count": 1 },
+    { "Type": "oil", "Placement": "Contested", "Count": 2 },
+    { "Type": "airport", "Placement": "Centre", "Count": 1 }
+  ]
+}
