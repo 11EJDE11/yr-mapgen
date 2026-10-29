@@ -15,7 +15,6 @@
     <EnableCompressionInSingleFile Condition="'$(RuntimeIdentifier)' != ''">true</EnableCompressionInSingleFile>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <DebugType Condition="'$(RuntimeIdentifier)' != ''">none</DebugType>
-    <LightningMapExe>$(MSBuildThisFileDirectory)..\..\..\LightningMap\publish\LightningMap.exe</LightningMapExe>
   </PropertyGroup>
 
   <ItemGroup>
@@ -25,8 +24,6 @@
   <ItemGroup>
     <!-- Theater data and the connected-tile config travel with the exe. -->
     <Content Include="..\..\data\*.json;..\..\data\*.ini" Link="data\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
-    <!-- The previewer: LightningMap's native single-file exe, if the sibling repo has been published. -->
-    <None Include="$(LightningMapExe)" Condition="Exists('$(LightningMapExe)')" Link="LightningMap.exe" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
   </ItemGroup>
 
 </Project>

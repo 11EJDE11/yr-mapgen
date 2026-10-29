@@ -5,6 +5,9 @@ multiplayer maps, plus a fairness analyser for existing maps.
 
 ## Building
 
+LightningMap (the preview renderer) is a git submodule, so clone with `--recursive` or run
+`git submodule update --init` once. It needs the .NET 10 SDK to build (the projects still target .NET 8).
+
 ```
 dotnet build src/MapGen.Cli -c Release
 ```
@@ -28,14 +31,14 @@ gets neither (and no island layouts).
 ## Desktop app
 
 `YRMapGenerator.exe` is a Windows app with all the settings, a Generate button, a preview and the
-fairness report. Publish a standalone folder (exe + `data\` + `LightningMap.exe`, no .NET needed):
+fairness report. Publish a standalone folder (exe + `data\`, no .NET needed):
 
 ```
 dotnet publish src/MapGen.App -c Release -r win-x64 -o publish
 ```
 
-Previews are rendered by [LightningMap](https://github.com/11EJDE11/LightningMap); the build copies
-`..\LightningMap\publish\LightningMap.exe` next to the app if it exists. Set the Yuri's Revenge
+Previews are rendered in-process by [LightningMap](https://github.com/11EJDE11/LightningMap)
+(`external/LightningMap`, its `library-split` branch), which reads the game's art. Set the Yuri's Revenge
 directory once (it is remembered in `%AppData%\yr-mapgen\settings.json`). "Copy to Maps\Custom" puts
 the map and a same-named `.png` (the lobby preview the CnCNet client looks for) into the client.
 
@@ -64,6 +67,7 @@ yr-mapgen analyze "Maps/Yuri's Revenge/tourofegypt.map"
 | `--gems` | `none`, `perplayer`, `contested`, `both` |
 | `--economy` | `ore`, `oilonly` (Oil in Corners style), `mixed` |
 | `--time` | `day`, `dusk`, `night` |
+| `--game` | Yuri's Revenge directory: the embedded preview becomes a LightningMap render (without it, a radar-style picture) |
 
 JSON settings also take `Garrisons` (0..1), `Trails` and `WallsAroundTech` (booleans).
 

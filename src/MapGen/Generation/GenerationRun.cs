@@ -39,7 +39,6 @@ internal sealed class PlayerSlot
     public int Canonical;
     /// <summary>Symmetry transform mapping the canonical start to this player.</summary>
     public int Transform;
-    /// <summary>Position within the team (edge vs middle) for maps without symmetry.</summary>
 }
 
 /// <summary>One generation attempt with a fixed seed.</summary>
@@ -80,12 +79,14 @@ internal sealed partial class GenerationRun
 
     private bool IsBlitz => settings.Style == MapStyle.Blitz;
 
-    public GenerationResult Run()
+    /// <param name="cancel">Checked between steps; cancelled once another attempt has won.</param>
+    public GenerationResult Run(CancellationToken cancel = default)
     {
         // MAPGEN_PROFILE=1 prints how long each step takes.
         var sw = System.Diagnostics.Stopwatch.StartNew();
         void Step(string name, Action a)
         {
+            cancel.ThrowIfCancellationRequested();
             var t0 = sw.Elapsed.TotalMilliseconds;
             a();
             if (Environment.GetEnvironmentVariable("MAPGEN_PROFILE") == "1")
@@ -390,7 +391,8 @@ internal sealed partial class GenerationRun
         map.GameMode = IsBlitz ? "Blitz" : "Standard";
         map.Name = settings.Name ?? $"[{players.Count}] Generated {settings.FormatLabel}{(IsBlitz ? " Blitz" : "")} #{seed}";
         map.ExtraBasic["GeneratorSeed"] = seed.ToString();
-        map.ExtraBasic["GeneratorSettings"] = $"{settings.Format};{settings.Style};{settings.Size};{settings.Resources};{settings.Gems};{settings.Economy};hills {settings.Hills:0.##};cliffs {settings.Cliffs:0.##};water {settings.Water:0.##};{sym.Kind}{(terrain.Kind == SymmetryKind.None ? " (terrain free)" : "")}";
+        // Invariant so the same seed writes the same file on every machine (no "0,5" on German Windows).
+        map.ExtraBasic["GeneratorSettings"] = FormattableString.Invariant($"{settings.Format};{settings.Style};{settings.Size};{settings.Resources};{settings.Gems};{settings.Economy};hills {settings.Hills:0.##};cliffs {settings.Cliffs:0.##};water {settings.Water:0.##};{sym.Kind}{(terrain.Kind == SymmetryKind.None ? " (terrain free)" : "")}");
 
         AddTeamMappings();
         ApplyLighting();

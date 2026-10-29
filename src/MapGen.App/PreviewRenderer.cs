@@ -1,66 +1,56 @@
-using System.Diagnostics;
+using LightningMap;
 
 namespace MapGen.App;
 
-/// <summary>Renders map previews by running LightningMap (shipped next to the exe).</summary>
+/// <summary>
+/// Renders map previews in-process with the LightningMap library. Its engine indexes the game archives
+/// once, so one is kept per game directory and used from one thread at a time.
+/// </summary>
 internal static class PreviewRenderer
 {
-    public static string ExePath
-    {
-        get
-        {
-            string local = Path.Combine(AppContext.BaseDirectory, "LightningMap.exe");
-            return File.Exists(local) ? local : null;
-        }
-    }
+    private static readonly object Gate = new();
+    private static RenderEngine engine;
+    private static string engineDirectory;
 
     public static bool IsGameDirectory(string dir)
         => !string.IsNullOrWhiteSpace(dir) && Directory.Exists(dir)
            && (File.Exists(Path.Combine(dir, "ra2md.mix")) || File.Exists(Path.Combine(dir, "gamemd.exe")));
 
-    /// <summary>Renders <paramref name="mapPath"/> to <paramref name="pngPath"/>. Returns an error message or null.</summary>
-    public static async Task<string> RenderAsync(string mapPath, string pngPath, string gameDirectory, int width, bool markers)
+    /// <summary>
+    /// Runs <paramref name="action"/> with the engine for <paramref name="gameDirectory"/>, or with null if
+    /// it is not a game directory. Throws if the game files cannot be loaded.
+    /// </summary>
+    public static T Use<T>(string gameDirectory, Func<RenderEngine, T> action)
     {
-        if (ExePath == null)
-            return "LightningMap.exe was not found next to the generator, so there is no preview.";
-        if (!IsGameDirectory(gameDirectory))
-            return "Set the Yuri's Revenge directory to see previews.";
-
-        var psi = new ProcessStartInfo(ExePath)
+        lock (Gate)
         {
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-        };
-        psi.ArgumentList.Add(mapPath);
-        psi.ArgumentList.Add("--game");
-        psi.ArgumentList.Add(gameDirectory);
-        psi.ArgumentList.Add("--output");
-        psi.ArgumentList.Add(pngPath);
-        if (width > 0)
-        {
-            psi.ArgumentList.Add("--width");
-            psi.ArgumentList.Add(width.ToString());
+            if (!IsGameDirectory(gameDirectory))
+                return action(null);
+            if (engine == null || !string.Equals(engineDirectory, gameDirectory, StringComparison.OrdinalIgnoreCase))
+            {
+                engine?.Dispose();
+                engine = null;
+                engine = new RenderEngine(gameDirectory);
+                engineDirectory = gameDirectory;
+            }
+            return action(engine);
         }
-        if (!markers)
-        {
-            psi.ArgumentList.Add("--no-markers");
-        }
-        else
-        {
-            // Half-size markers (LightningMap 1.2+) so they do not hide the bases.
-            psi.ArgumentList.Add("--marker-scale");
-            psi.ArgumentList.Add("0.5");
-        }
-
-        using var process = Process.Start(psi);
-        var stdout = process.StandardOutput.ReadToEndAsync();
-        var stderr = process.StandardError.ReadToEndAsync();
-        await process.WaitForExitAsync();
-
-        if (process.ExitCode != 0 || !File.Exists(pngPath))
-            return $"LightningMap failed (exit {process.ExitCode}): {(await stderr).Trim()} {(await stdout).Trim()}".Trim();
-        return null;
     }
+
+    /// <summary>Renders <paramref name="mapPath"/> to <paramref name="pngPath"/>. Returns an error message or null.</summary>
+    public static Task<string> RenderAsync(string mapPath, string pngPath, string gameDirectory, int width, bool markers)
+        => Task.Run(() =>
+        {
+            if (!IsGameDirectory(gameDirectory))
+                return "Set the Yuri's Revenge directory to see previews.";
+            try
+            {
+                Use(gameDirectory, r => r.Render(mapPath, pngPath, new RenderOptions(Width: width, StartMarkers: markers)));
+                return null;
+            }
+            catch (Exception ex)
+            {
+                return "LightningMap failed: " + ex.Message;
+            }
+        });
 }

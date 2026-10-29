@@ -1,4 +1,5 @@
 using System.Text.Json;
+using LightningMap;
 using MapGen.Analysis;
 using MapGen.Formats;
 using MapGen.Generation;
@@ -43,6 +44,7 @@ internal static class Program
     {
         var settings = new GeneratorSettings();
         string output = null;
+        string gameDir = null;
         int count = 1;
 
         for (int i = 0; i < args.Length; i++)
@@ -78,6 +80,7 @@ internal static class Program
                 case "attempts": settings.MaxAttempts = int.Parse(value); break;
                 case "count": count = int.Parse(value); break;
                 case "out": output = value; break;
+                case "game": gameDir = value; break;
                 default:
                     Console.Error.WriteLine($"Unknown option --{key}");
                     return 1;
@@ -89,6 +92,19 @@ internal static class Program
         var connected = ConnectedTileType.Load(Path.Combine(dataDir, "ConnectedTileDrawer.ini"), theater);
         var generator = new MapGenerator(theater, connected);
         int baseSeed = settings.Seed;
+
+        // The game's art makes the embedded preview a LightningMap render instead of a radar-style one.
+        RenderEngine renderer = null;
+        try
+        {
+            renderer = gameDir != null ? new RenderEngine(gameDir) : null;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Could not load the game files from {gameDir}: {ex.Message}");
+            return 1;
+        }
+        using var _ = renderer;
 
         for (int n = 0; n < count; n++)
         {
@@ -102,7 +118,9 @@ internal static class Program
                 path = Path.Combine(dir, $"gen_{settings.FormatLabel}_{settings.Theater.ToLowerInvariant()}_{result.Seed}.map");
             }
 
-            MapWriter.Write(result.Map, path);
+            string previewError = MapWriter.Write(result.Map, theater, path, renderer);
+            if (previewError != null)
+                Console.Error.WriteLine(previewError);
             Console.WriteLine($"Wrote {path} (seed {result.Seed}, {result.Attempts} attempt(s), {result.Map.Width}x{result.Map.Height})");
             Console.WriteLine(result.Report.ToText());
         }
@@ -127,6 +145,7 @@ internal static class Program
         Console.WriteLine("                   [--resources low|medium|high|veryhigh] [--gems none|perplayer|contested|both]");
         Console.WriteLine("                   [--economy ore|oilonly|mixed] [--terrain flat|cliffs] [--symmetry rotate180|mirrorleftright|mirrortopbottom|quad|diamond|none]");
         Console.WriteLine("                   [--trees 0..1] [--time day|dusk|night] [--seed N] [--count N] [--out path]");
+        Console.WriteLine("                   [--game <YR directory>]   (renders the embedded preview with LightningMap)");
     }
 
     private static string FindDataDirectory()

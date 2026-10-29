@@ -1,0 +1,4 @@
+[submodule "external/LightningMap"]
+	path = external/LightningMap
+	url = https://github.com/11EJDE11/LightningMap
+	branch = library-split

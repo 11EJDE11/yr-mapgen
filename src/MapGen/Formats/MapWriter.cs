@@ -1,6 +1,8 @@
 using System.Globalization;
 using System.Text;
+using LightningMap;
 using MapGen.Model;
+using MapGen.Theater;
 
 namespace MapGen.Formats;
 
@@ -16,19 +18,37 @@ public static class MapWriter
         ("Neutral", "Grey"), ("Special", "Grey"),
     };
 
-    public static void Write(MapModel map, string path)
+    /// <summary>
+    /// Writes the map. With a LightningMap <paramref name="renderer"/> the embedded preview is a render of
+    /// the map; without one it is radar-style.
+    /// </summary>
+    /// <returns>Why the render failed (the file then keeps the radar preview), or null.</returns>
+    public static string Write(MapModel map, TheaterData theater, string path, RenderEngine renderer = null)
     {
-        File.WriteAllText(path, ToIni(map).Write(), Encoding.Latin1);
+        var ini = ToIni(map, theater);
+        File.WriteAllText(path, ini.Write(), Encoding.Latin1);
+        if (renderer == null)
+            return null;
+
+        // LightningMap reads the map from disk: render what was just written, then swap the preview in.
+        try
+        {
+            SetPreview(ini, MapPreview.Render(path, renderer, MapPreview.RenderWidth(map)));
+        }
+        catch (Exception ex)
+        {
+            return "Preview render failed, kept the radar-style preview: " + ex.Message;
+        }
+        File.WriteAllText(path, ini.Write(), Encoding.Latin1);
+        return null;
     }
 
-    public static IniDocument ToIni(MapModel map)
+    public static IniDocument ToIni(MapModel map, TheaterData theater)
     {
         var ini = new IniDocument();
 
-        // The game and the client expect the preview sections first; a real preview can be injected later.
-        ini.Set("Preview", "Size", "0,0,106,61");
-        ini.Set("PreviewPack", "1", "yAsAIAXQ5PDQ5PDQ6JQATAEE6PDQ4PDI4JgBTAFEAkgAJyAATAG0AydEAEABpAJIA0wBVA");
-        ini.Set("PreviewPack", "2", "BIACcgAEwBtAMnRABAAaQCSANMAVQASAAnIABMAbQDJ0QAQAGkAkgDTAFUAEgAJyAATAG0");
+        // The game and the client expect the preview sections first.
+        SetPreview(ini, MapPreview.RenderRadar(map, theater));
 
         WriteBasic(map, ini);
         ini.Set("Map", "Size", $"0,0,{map.Width},{map.Height}");
@@ -89,6 +109,16 @@ public static class MapWriter
 
         foreach (var (k, v) in map.ExtraBasic)
             b.Set(k, v);
+    }
+
+    private static void SetPreview(IniDocument ini, (int Width, int Height, byte[] Rgb) preview)
+    {
+        // 24-bit RGB rows, LZO-packed in the same blocks as IsoMapPack5.
+        ini.Section("Preview").Set("Size", $"0,0,{preview.Width},{preview.Height}");
+        var pack = ini.Section("PreviewPack");
+        pack.Clear();
+        foreach (var (k, v) in PackEncoding.ToBase64Lines(PackEncoding.EncodeLzo(preview.Rgb)))
+            pack.Set(k, v);
     }
 
     private static void WriteSpecialFlags(IniDocument ini)

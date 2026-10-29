@@ -97,4 +97,11 @@ public sealed class IniSectionData
             keys.Add(key);
         values[key] = value;
     }
+
+    /// <summary>Removes every key; the section keeps its place in the document.</summary>
+    public void Clear()
+    {
+        keys.Clear();
+        values.Clear();
+    }
 }

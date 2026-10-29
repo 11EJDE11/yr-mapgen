@@ -414,16 +414,27 @@ internal sealed class MainForm : Form
         SetBusy(true, "Generating...");
         try
         {
-            var result = await Task.Run(() =>
+            string gameDir = txtGameDir.Text.Trim();
+            var (result, mapPath, previewError) = await Task.Run(() =>
             {
                 var (data, connected) = LoadTheater(settings.Theater);
-                return new MapGenerator(data, connected).Generate(settings);
-            });
+                var generated = new MapGenerator(data, connected).Generate(settings);
 
-            Directory.CreateDirectory(workDir);
-            string name = $"gen_{settings.FormatLabel}_{settings.Theater.ToLowerInvariant()}_{result.Seed}";
-            lastMapPath = Path.Combine(workDir, name + ".map");
-            MapWriter.Write(result.Map, lastMapPath);
+                Directory.CreateDirectory(workDir);
+                string path = Path.Combine(workDir, $"gen_{settings.FormatLabel}_{settings.Theater.ToLowerInvariant()}_{generated.Seed}.map");
+                string error;
+                try
+                {
+                    error = PreviewRenderer.Use(gameDir, r => MapWriter.Write(generated.Map, data, path, r));
+                }
+                catch (Exception ex)
+                {
+                    MapWriter.Write(generated.Map, data, path);
+                    error = "LightningMap could not load the game files, so the map has a radar-style preview: " + ex.Message;
+                }
+                return (generated, path, error);
+            });
+            lastMapPath = mapPath;
             lastResult = result;
 
             txtReport.Text = $"{result.Map.Name}   {result.Map.Width}x{result.Map.Height}   seed {result.Seed}   " +
@@ -433,9 +444,9 @@ internal sealed class MainForm : Form
             string png = Path.ChangeExtension(lastMapPath, ".preview.png");
             // Twice the view's width so zooming in stays sharp.
             int width = Math.Clamp(picture.Width * 2, 1600, 4000);
-            string error = await PreviewRenderer.RenderAsync(lastMapPath, png, txtGameDir.Text.Trim(), width, markers: true);
+            string error = await PreviewRenderer.RenderAsync(lastMapPath, png, gameDir, width, markers: true);
             ShowPreview(error == null ? png : null);
-            SetBusy(false, error ?? $"Generated {result.Map.Name}");
+            SetBusy(false, error ?? previewError ?? $"Generated {result.Map.Name}");
         }
         catch (Exception ex)
         {
