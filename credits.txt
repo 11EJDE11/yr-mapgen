@@ -10,4 +10,11 @@ World-Altering Editor (WAE) by Rampastring
   - The MiniLZO and Format80 codecs
   - WAE's Yuri's Revenge configuration from the CnCNet YR client (the .ini files in data\)
 
+ccmaps-net by zzattack
+  https://github.com/zzattack
+  https://github.com/zzattack/ccmaps-net
+
+  Used in this generator:
+  - MIX file reading in TileDump, which produced the tile data in data\
+
 WAE is licensed under GPL-3.0, so this generator is GPL-3.0 as well.
