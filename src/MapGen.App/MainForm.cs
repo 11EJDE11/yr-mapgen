@@ -23,6 +23,7 @@ internal sealed class MainForm : Form
     private CheckBox chkRandomSeed, chkDefaultTech;
     private DataGridView gridTech;
     private TextBox txtGameDir, txtReport;
+    private Label lblGameDirHint;
     private ZoomImageBox picture;
     private Button btnGenerate, btnRandom, btnSave, btnCopyToClient, btnOpenFolder;
     private Label lblStatus;
@@ -127,14 +128,27 @@ internal sealed class MainForm : Form
         left.Controls.Add(gridTech);
         left.SetColumnSpan(gridTech, 2);
 
+        // The game directory stays visible above the scrolling settings: previews and copying to the
+        // client need it, so a new user should see it first.
+        var game = new TableLayoutPanel { Dock = DockStyle.Top, ColumnCount = 2, AutoSize = true, Padding = new Padding(8, 8, 8, 0) };
+        game.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 110));
+        game.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        split.Panel1.Controls.Add(game);
+
         txtGameDir = new TextBox();
         var btnBrowse = new Button { Text = "...", Width = 30, Dock = DockStyle.Right };
         btnBrowse.Click += (_, _) => BrowseGameDirectory();
-        var gamePanel = new Panel { Height = 26 };
+        var gamePanel = new Panel { Height = 26, Dock = DockStyle.Fill };
         gamePanel.Controls.Add(txtGameDir);
         gamePanel.Controls.Add(btnBrowse);
         txtGameDir.Dock = DockStyle.Fill;
-        Row("YR directory", gamePanel);
+        game.Controls.Add(new Label { Text = "YR directory", AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(0, 6, 0, 0), Font = new Font(Font, FontStyle.Bold) });
+        game.Controls.Add(gamePanel);
+
+        lblGameDirHint = new Label { AutoSize = true, MaximumSize = new Size(370, 0), Margin = new Padding(0, 2, 0, 6) };
+        game.Controls.Add(lblGameDirHint);
+        game.SetColumnSpan(lblGameDirHint, 2);
+        txtGameDir.TextChanged += (_, _) => UpdateGameDirHint();
 
         // Actions stay visible below the scrolling settings.
         var actions = new TableLayoutPanel { Dock = DockStyle.Bottom, ColumnCount = 2, AutoSize = true, Padding = new Padding(8, 4, 8, 8) };
@@ -298,6 +312,7 @@ internal sealed class MainForm : Form
         nudSeed.Value = Math.Clamp(s.Seed, 0, (int)nudSeed.Maximum);
         chkRandomSeed.Checked = config.RandomSeed;
         txtGameDir.Text = config.GameDirectory ?? "";
+        UpdateGameDirHint();
 
         FillTechGrid(s.Tech ?? new GeneratorSettings { Format = s.Format, Style = s.Style, Economy = s.Economy }.EffectiveTech());
         chkDefaultTech.Checked = config.DefaultTech || s.Tech == null;
@@ -387,6 +402,17 @@ internal sealed class MainForm : Form
         }
         gridTech.Enabled = !chkDefaultTech.Checked;
         gridTech.DefaultCellStyle.ForeColor = chkDefaultTech.Checked ? Color.Gray : SystemColors.ControlText;
+    }
+
+    private void UpdateGameDirHint()
+    {
+        bool valid = PreviewRenderer.IsGameDirectory(txtGameDir.Text.Trim());
+        lblGameDirHint.Text = valid
+            ? "Previews are rendered with your game's art."
+            : string.IsNullOrWhiteSpace(txtGameDir.Text)
+                ? "Set your Yuri's Revenge (CnCNet) folder to see map previews and copy maps to the client."
+                : "No Yuri's Revenge game files found in this folder.";
+        lblGameDirHint.ForeColor = valid ? Color.DimGray : Color.Firebrick;
     }
 
     private void BrowseGameDirectory()
