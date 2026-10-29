@@ -167,7 +167,7 @@ internal sealed class MainForm : Form
         btnSave = new Button { Text = "Save map as...", AutoSize = true, Enabled = false };
         btnSave.Click += (_, _) => SaveMapAs();
         btnCopyToClient = new Button { Text = "Copy to Maps\\Custom", AutoSize = true, Enabled = false };
-        btnCopyToClient.Click += async (_, _) => await CopyToClientAsync();
+        btnCopyToClient.Click += (_, _) => CopyToClient();
         btnOpenFolder = new Button { Text = "Open folder", AutoSize = true, Enabled = false };
         btnOpenFolder.Click += (_, _) => { if (lastMapPath != null) Process.Start("explorer.exe", $"/select,\"{lastMapPath}\""); };
         buttons.Controls.AddRange(new Control[] { btnSave, btnCopyToClient, btnOpenFolder });
@@ -508,10 +508,10 @@ internal sealed class MainForm : Form
     }
 
     /// <summary>
-    /// Copies the map into the client's Maps\Custom folder with a same-named .png, which the CnCNet
-    /// client uses as the lobby preview (it draws its own start markers, so the png has none).
+    /// Copies the map into the client's Maps\Custom folder. The lobby preview is the one embedded in the
+    /// map; a same-named .png would take its place, so one left by an earlier copy is removed.
     /// </summary>
-    private async Task CopyToClientAsync()
+    private void CopyToClient()
     {
         string gameDir = txtGameDir.Text.Trim();
         if (lastMapPath == null || !PreviewRenderer.IsGameDirectory(gameDir))
@@ -524,10 +524,8 @@ internal sealed class MainForm : Form
         Directory.CreateDirectory(customDir);
         string target = Path.Combine(customDir, Path.GetFileName(lastMapPath));
         File.Copy(lastMapPath, target, overwrite: true);
-
-        SetBusy(true, "Rendering lobby preview...");
-        string error = await PreviewRenderer.RenderAsync(target, Path.ChangeExtension(target, ".png"), gameDir, 0, markers: false);
-        SetBusy(false, error ?? $"Copied to {target} (pick it from the custom maps list in the client)");
+        File.Delete(Path.ChangeExtension(target, ".png"));
+        lblStatus.Text = $"Copied to {target} (pick it from the custom maps list in the client)";
     }
 
     /// <summary>

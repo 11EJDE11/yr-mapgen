@@ -40,7 +40,8 @@ dotnet publish src/MapGen.App -c Release -r win-x64 -o publish
 Previews are rendered in-process by [LightningMap](https://github.com/11EJDE11/LightningMap)
 (`external/LightningMap`, its `library-split` branch), which reads the game's art. Set the Yuri's Revenge
 directory once (it is remembered in `%AppData%\yr-mapgen\settings.json`). "Copy to Maps\Custom" puts
-the map and a same-named `.png` (the lobby preview the CnCNet client looks for) into the client.
+the map into the client; the lobby preview is the one embedded in the map, so no `.png` is needed (a
+same-named one would replace it, so one left from an earlier copy is removed).
 
 ## Usage
 
