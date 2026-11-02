@@ -9,6 +9,12 @@ internal sealed partial class GenerationRun
     private List<int> oreOverlays;
     private List<int> gemOverlays;
 
+    /// <summary>
+    /// Features placed for one player (their own tech and gem field), in canonical coordinates: the
+    /// destinations of that player's dirt trails. Shared and team features are not listed.
+    /// </summary>
+    private readonly List<(int Owner, CellPos Centre, double Radius)> playerTargets = new();
+
     // ---------------------------------------------------------------- resources
 
     private (int Main, int Second, int Gem, int Contested, int ContestedGem) FieldSizes()
@@ -112,6 +118,12 @@ internal sealed partial class GenerationRun
                 continue;
 
             FillField(blob, gems);
+            if (gems)
+            {
+                double cx = blob.Average(p => p.X), cy = blob.Average(p => p.Y);
+                var fieldCentre = new CellPos((int)Math.Round(cx), (int)Math.Round(cy));
+                playerTargets.Add((k, fieldCentre, blob.Max(p => p.DistanceTo(fieldCentre)) + 0.5));
+            }
             return true;
         }
         return false;
@@ -351,8 +363,15 @@ internal sealed partial class GenerationRun
             var origin = new CellPos(start.X + (int)Math.Round(Math.Cos(angle) * d - w / 2.0),
                 start.Y + (int)Math.Round(Math.Sin(angle) * d - h / 2.0));
 
+            int before = structures.Count;
             if (TryPlaceStructure(type, origin, k, z => z is Zone.Free or Zone.Base or Zone.Open, margin: 1))
+            {
+                // The first copy is the canonical one (transform 0).
+                var own = structures[before];
+                var centre = new CellPos(own.Position.X + w / 2, own.Position.Y + h / 2);
+                playerTargets.Add((k, centre, Math.Max(w, h) / 2.0 + 0.5));
                 return true;
+            }
         }
         return false;
     }

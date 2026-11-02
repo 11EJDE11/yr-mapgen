@@ -33,7 +33,8 @@ public sealed class MapGenerator
         this.connectedTypes = connectedTypes;
     }
 
-    public GenerationResult Generate(GeneratorSettings settings)
+    /// <param name="progress">Receives a short line whenever an attempt moves to its next step.</param>
+    public GenerationResult Generate(GeneratorSettings settings, Action<string> progress = null)
     {
         GenerationResult best = null;
         double bestScore = double.MaxValue;
@@ -58,13 +59,16 @@ public sealed class MapGenerator
                 for (; started <= last; started++)
                 {
                     int seed = settings.Seed + started * 7919;
-                    running[started] = Task.Run(() => RunAttempt(settings, seed, cancel));
+                    int index = started;
+                    running[started] = Task.Run(() => RunAttempt(settings, seed, index, cancel, progress));
                 }
 
                 var (result, failure) = running[attempt].GetAwaiter().GetResult();
                 if (result == null)
                 {
                     failures.Add(failure);
+                    if (failure != null)
+                        progress?.Invoke($"Attempt {attempt + 1} failed ({failure}); trying another seed");
                     continue;
                 }
 
@@ -86,6 +90,7 @@ public sealed class MapGenerator
 
                 if (result.Report.Problems.Count == 0)
                     break;
+                progress?.Invoke($"Attempt {attempt + 1} is not fair enough (spread {result.Report.WorstSpread:0.#}%); trying another seed");
             }
         }
         finally
@@ -98,11 +103,11 @@ public sealed class MapGenerator
             + string.Join("; ", failures.GroupBy(f => f).Select(g => $"{g.Key} (x{g.Count()})")));
     }
 
-    private (GenerationResult, string) RunAttempt(GeneratorSettings settings, int seed, CancellationToken cancel)
+    private (GenerationResult, string) RunAttempt(GeneratorSettings settings, int seed, int index, CancellationToken cancel, Action<string> progress)
     {
         try
         {
-            return (new GenerationRun(theater, connectedTypes, settings, seed).Run(cancel), null);
+            return (new GenerationRun(theater, connectedTypes, settings, seed).Run(cancel, step => progress?.Invoke($"Attempt {index + 1}: {step}")), null);
         }
         catch (GenerationFailedException ex)
         {

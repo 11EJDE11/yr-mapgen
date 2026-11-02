@@ -7,8 +7,15 @@ namespace MapGen.App;
 internal sealed class AppConfig
 {
     public string GameDirectory { get; set; }
-    public bool RandomSeed { get; set; } = true;
     public bool DefaultTech { get; set; } = true;
+    /// <summary>The fairness report under the preview; hidden unless asked for.</summary>
+    public bool ShowReport { get; set; }
+    /// <summary>
+    /// Settings the Random button leaves alone (keys of the form's rows). Null means <see cref="DefaultLocked"/>:
+    /// the match format, style and economy, which are a choice rather than a taste.
+    /// </summary>
+    public List<string> Locked { get; set; }
+    public static readonly string[] DefaultLocked = { "Format", "Style", "Economy" };
     public GeneratorSettings Settings { get; set; } = new();
 
     private static string FilePath => Path.Combine(

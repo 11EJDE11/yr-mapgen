@@ -149,8 +149,10 @@ internal sealed partial class GenerationRun
     }
 
     /// <summary>
-    /// A winding dirt trail from each base towards its nearest tech or gem field, as on many of the
-    /// shipped maps. Trails are cosmetic but keep trees off the route.
+    /// Dirt trails from each base to the tech and gem fields placed for that player, as on many of
+    /// the shipped maps. Targets in roughly the same direction share one trail that calls at each of
+    /// them in turn; targets in different directions get trails of their own. Shared and contested
+    /// features get no trail. Trails are cosmetic but keep trees off the route.
     /// </summary>
     private void PlaceTrails()
     {
@@ -160,51 +162,118 @@ internal sealed partial class GenerationRun
         if (roadType == null)
             return;
 
+        const int MaxTrailsPerPlayer = 3;
         for (int k = 0; k < canonicalStarts.Count; k++)
         {
             var start = canonicalStarts[k];
-            var targets = structures.Where(s => s.Position.DistanceTo(start) is > 14 and < 45).Select(s => s.Position)
-                .Concat(GemFieldCentres().Where(g => g.DistanceTo(start) is > 14 and < 45))
-                .OrderBy(t => t.DistanceTo(start)).ToList();
-            if (targets.Count == 0)
-                continue;
-            var target = targets[rng.Next(Math.Min(2, targets.Count))];
-            TryPlaceTrail(roadType, start, target);
+            var targets = playerTargets.Where(t => t.Owner == k && t.Centre.DistanceTo(start) > BaseCoreRadius + 3)
+                .OrderBy(t => t.Centre.DistanceTo(start)).ToList();
+
+            foreach (var cluster in ClusterByDirection(start, targets).Take(MaxTrailsPerPlayer))
+            {
+                // The whole chain first; if the planner cannot route it, settle for the nearest target.
+                if (!TryPlaceTrail(roadType, start, cluster) && cluster.Count > 1)
+                    TryPlaceTrail(roadType, start, cluster.Take(1).ToList());
+            }
         }
     }
 
-    private IEnumerable<CellPos> GemFieldCentres()
+    /// <summary>
+    /// Groups targets (nearest first) that lie within a narrow angle of each other as seen from the
+    /// start and are not far apart, so one trail serves a tech building and the gem field behind it.
+    /// </summary>
+    private static List<List<(int Owner, CellPos Centre, double Radius)>> ClusterByDirection(CellPos start, List<(int Owner, CellPos Centre, double Radius)> targets)
     {
-        var gems = new HashSet<int>(gemOverlays ?? new List<int>());
-        var cells = map.AllValidCells().Where(p => overlay[p.X, p.Y] >= 0 && gems.Contains(overlay[p.X, p.Y])).ToList();
-        // Rough cluster centres: every 6th cell is plenty for choosing a destination.
-        return cells.Where((_, i) => i % 6 == 0);
+        const double MaxAngle = 35 * Math.PI / 180;
+        const double MaxGap = 16;
+        var clusters = new List<List<(int Owner, CellPos Centre, double Radius)>>();
+        foreach (var t in targets)
+        {
+            double angle = Math.Atan2(t.Centre.Y - start.Y, t.Centre.X - start.X);
+            var home = clusters.FirstOrDefault(c =>
+            {
+                var last = c[^1];
+                double a = Math.Atan2(last.Centre.Y - start.Y, last.Centre.X - start.X);
+                double diff = Math.Abs(Math.IEEERemainder(angle - a, 2 * Math.PI));
+                return diff < MaxAngle && last.Centre.DistanceTo(t.Centre) < MaxGap;
+            });
+            if (home != null)
+                home.Add(t);
+            else
+                clusters.Add(new List<(int Owner, CellPos Centre, double Radius)> { t });
+        }
+        return clusters;
     }
 
-    private bool TryPlaceTrail(ConnectedTileType roadType, CellPos start, CellPos target)
+    /// <summary>
+    /// Lays one trail from just outside the start position past each target in turn, trying a few
+    /// bends before giving up. The trail ends at the edge of the last target.
+    /// </summary>
+    private bool TryPlaceTrail(ConnectedTileType roadType, CellPos start, List<(int Owner, CellPos Centre, double Radius)> targets)
     {
-        double dx = target.X - start.X, dy = target.Y - start.Y, len = Math.Sqrt(dx * dx + dy * dy);
-        if (len < 10)
+        var first = targets[0].Centre;
+        double dx = first.X - start.X, dy = first.Y - start.Y, len = Math.Sqrt(dx * dx + dy * dy);
+        if (len < 6)
             return false;
         double ux = dx / len, uy = dy / len;
-        // From just inside the base edge to a few cells short of the target, with a kink in the middle.
-        var a = new CellPos(start.X + (int)Math.Round(ux * (BaseRadius - 2)), start.Y + (int)Math.Round(uy * (BaseRadius - 2)));
-        var b = new CellPos(target.X - (int)Math.Round(ux * 4), target.Y - (int)Math.Round(uy * 4));
-        double bend = (rng.NextDouble() - 0.5) * len * 0.35;
-        var mid = new CellPos((a.X + b.X) / 2 + (int)Math.Round(-uy * bend), (a.Y + b.Y) / 2 + (int)Math.Round(ux * bend));
-        var path = new List<CellPos> { a, mid, b };
 
+        // A few cells out from the start position: the construction yard and starting units sit there.
+        var a = new CellPos(start.X + (int)Math.Round(ux * 4), start.Y + (int)Math.Round(uy * 4));
+
+        // Calling points: at the near edge of each target, approached from the previous point.
+        var stops = new List<CellPos>();
+        var from = a;
+        foreach (var t in targets)
+        {
+            double ex = t.Centre.X - from.X, ey = t.Centre.Y - from.Y, el = Math.Sqrt(ex * ex + ey * ey);
+            if (el < t.Radius + 2)
+                break;
+            double back = t.Radius + 1;
+            var edge = new CellPos(t.Centre.X - (int)Math.Round(ex / el * back), t.Centre.Y - (int)Math.Round(ey / el * back));
+            if (edge == from)
+                break;
+            stops.Add(edge);
+            from = edge;
+        }
+        if (stops.Count == 0)
+            return false;
+
+        // A kink in the first leg, in one direction, the other, or none.
+        double bend = (rng.NextDouble() * 0.5 + 0.5) * a.DistanceTo(stops[0]) * 0.35;
+        foreach (double b in new[] { bend, -bend, 0 })
+        {
+            var path = new List<CellPos> { a };
+            if (b != 0)
+            {
+                var mid = new CellPos((a.X + stops[0].X) / 2 + (int)Math.Round(-uy * b), (a.Y + stops[0].Y) / 2 + (int)Math.Round(ux * b));
+                if (mid != a && mid != stops[0])
+                    path.Add(mid);
+            }
+            path.AddRange(stops);
+            if (TryPlaceTrailPath(roadType, path))
+                return true;
+        }
+        return false;
+    }
+
+    private bool TryPlaceTrailPath(ConnectedTileType roadType, List<CellPos> path)
+    {
         int seed = rng.Next();
         var plans = new List<(ConnectedTilePlan Plan, int Level)>();
         var claimed = new HashSet<CellPos>();
+        var seen = new HashSet<string>();
         for (int t = 0; t < sym.Order; t++)
         {
             var imagePath = path.Select(p => sym.Apply(t, p)).ToList();
+            // A start on a mirror axis with its tech straight behind it: the image is the same trail.
+            if (!seen.Add(string.Join(";", imagePath)))
+                continue;
             if (!IsFlatGround(imagePath[0]))
                 return false;
             int level = GroundLevel(imagePath[0]);
+            // Trails are cosmetic tiles, so they may run through the base, core included.
             bool Valid(CellPos p) => IsUsable(p) && IsFlatGround(p) && GroundLevel(p) == level && !claimed.Contains(p)
-                                     && zone[p.X, p.Y] is Zone.Free or Zone.Open or Zone.Base;
+                                     && zone[p.X, p.Y] is Zone.Free or Zone.Open or Zone.Base or Zone.BaseCore;
             if (!imagePath.All(Valid))
                 return false;
 

@@ -10,7 +10,10 @@ Yuri's Revenge folder. No .NET install needed.
 
 ## Desktop app
 
-- All settings, Generate / All random, zoomable preview, fairness report.
+- All settings, Generate / Random, zoomable preview, fairness report.
+- Random rolls every setting that is not locked. The padlock next to a setting keeps it: lock
+  "Gem fields %" at 200 and press Random for any map with big gem fields. Format, style and
+  economy start locked. An unlocked seed is re-rolled on every Generate.
 - The Yuri's Revenge folder is needed for previews and "Copy to Maps\Custom". Saved in
   `%AppData%\yr-mapgen\settings.json`.
 - "Copy to Maps\Custom" copies the `.map` only. The lobby preview is embedded in the map.

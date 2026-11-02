@@ -79,14 +79,26 @@ internal sealed partial class GenerationRun
 
     private bool IsBlitz => settings.Style == MapStyle.Blitz;
 
+    private static readonly Dictionary<string, string> StepLabels = new()
+    {
+        ["CreateMap"] = "creating the map", ["PlaceStarts"] = "placing starts", ["ReserveBases"] = "reserving bases",
+        ["PlanTerrain"] = "shaping terrain", ["SharedTech"] = "placing shared tech", ["Resources"] = "placing resources",
+        ["PlayerTech"] = "placing player tech", ["TechWalls"] = "building sandbags", ["Garrisons"] = "placing garrisons",
+        ["Trails"] = "laying trails", ["Obstacles"] = "growing forests", ["Scatter"] = "scattering trees and rocks",
+        ["Connectivity"] = "checking routes", ["Trees"] = "planting trees", ["Realize"] = "writing tiles",
+        ["Analyze"] = "measuring fairness",
+    };
+
     /// <param name="cancel">Checked between steps; cancelled once another attempt has won.</param>
-    public GenerationResult Run(CancellationToken cancel = default)
+    /// <param name="progress">Told the name of each step as it starts.</param>
+    public GenerationResult Run(CancellationToken cancel = default, Action<string> progress = null)
     {
         // MAPGEN_PROFILE=1 prints how long each step takes.
         var sw = System.Diagnostics.Stopwatch.StartNew();
         void Step(string name, Action a)
         {
             cancel.ThrowIfCancellationRequested();
+            progress?.Invoke(StepLabels.TryGetValue(name, out var label) ? label : name);
             var t0 = sw.Elapsed.TotalMilliseconds;
             a();
             if (Environment.GetEnvironmentVariable("MAPGEN_PROFILE") == "1")
@@ -319,6 +331,22 @@ internal sealed partial class GenerationRun
         if (newStructures.Count > maxCopies)
             return false;
 
+        // An exploding oil derrick takes out another one right next to it, so keep oils apart. This
+        // covers an oil's own images too (two copies either side of a symmetry axis).
+        if (IsOil(type))
+        {
+            var existing = structures.Where(s => IsOil(s.Type)).ToList();
+            for (int i = 0; i < newStructures.Count; i++)
+            {
+                var a = newStructures[i];
+                if (existing.Any(b => FootprintGap(a, b) < OilPadding))
+                    return false;
+                for (int j = i + 1; j < newStructures.Count; j++)
+                    if (FootprintGap(a, newStructures[j]) < OilPadding)
+                        return false;
+            }
+        }
+
         foreach (var c in images)
             if (!IsUsable(c) || !allowed(ZoneAt(c)) || !IsFlatGround(c))
                 return false;
@@ -348,6 +376,21 @@ internal sealed partial class GenerationRun
 
         structures.AddRange(newStructures);
         return true;
+    }
+
+    /// <summary>Empty cells that must separate two oil derricks' foundations.</summary>
+    private const int OilPadding = 2;
+
+    private static bool IsOil(string type) => type.Equals("CAOILD", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Empty cells between two buildings' foundations along the axis they are furthest apart on (0 = touching or overlapping).</summary>
+    private int FootprintGap(StructureObject a, StructureObject b)
+    {
+        var (aw, ah) = theater.Building(a.Type).FoundationSize;
+        var (bw, bh) = theater.Building(b.Type).FoundationSize;
+        int gapX = Math.Max(0, Math.Max(b.Position.X - (a.Position.X + aw), a.Position.X - (b.Position.X + bw)));
+        int gapY = Math.Max(0, Math.Max(b.Position.Y - (a.Position.Y + ah), a.Position.Y - (b.Position.Y + bh)));
+        return Math.Max(gapX, gapY);
     }
 
     // ---------------------------------------------------------------- realisation

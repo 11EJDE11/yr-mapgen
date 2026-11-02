@@ -20,13 +20,19 @@ internal sealed class MainForm : Form
     private TrackBar tbHills, tbCliffs, tbWater, tbTrees, tbGarrisons, tbOreSize, tbGemSize, tbDrills;
     private CheckBox chkTrails, chkWalls;
     private NumericUpDown nudSeed;
-    private CheckBox chkRandomSeed, chkDefaultTech;
+    private CheckBox chkDefaultTech;
+    /// <summary>Padlock per setting: a locked setting is kept by "Random unlocked" (and a locked seed by Generate).</summary>
+    private readonly Dictionary<string, CheckBox> locks = new();
     private DataGridView gridTech;
     private TextBox txtGameDir, txtReport;
     private Label lblGameDirHint;
     private ZoomImageBox picture;
     private Button btnGenerate, btnRandom, btnSave, btnCopyToClient, btnOpenFolder;
+    private CheckBox chkReport;
     private Label lblStatus;
+    private SplitContainer previewSplit;
+    private Panel busyOverlay;
+    private Label lblBusy;
 
     private GenerationResult lastResult;
     private string lastMapPath;
@@ -56,18 +62,60 @@ internal sealed class MainForm : Form
         var left = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
-            ColumnCount = 2,
+            ColumnCount = 3,
             AutoScroll = true,
             Padding = new Padding(8),
         };
-        left.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 110));
+        left.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 26));
+        left.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 100));
         left.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         split.Panel1.Controls.Add(left);
 
-        void Row(string label, Control control)
+        var lockTip = new ToolTip();
+
+        // Header: what the padlock column does, with lock all / unlock all.
+        var lockHeader = new FlowLayoutPanel { AutoSize = true, Margin = new Padding(0, 0, 0, 4), WrapContents = false };
+        var lblLock = new Label { Text = "🔒 = keep when rolling random.", AutoSize = true, ForeColor = Color.DimGray, Margin = new Padding(0, 2, 6, 0) };
+        var lnkLockAll = new LinkLabel { Text = "Lock all", AutoSize = true, Margin = new Padding(0, 2, 6, 0) };
+        var lnkUnlockAll = new LinkLabel { Text = "Unlock all", AutoSize = true, Margin = new Padding(0, 2, 0, 0) };
+        lnkLockAll.LinkClicked += (_, _) => SetAllLocks(true);
+        lnkUnlockAll.LinkClicked += (_, _) => SetAllLocks(false);
+        lockHeader.Controls.AddRange(new Control[] { lblLock, lnkLockAll, lnkUnlockAll });
+        left.Controls.Add(lockHeader);
+        left.SetColumnSpan(lockHeader, 3);
+
+        void Row(string key, string label, Control control, string lockHint = null)
         {
+            var padlock = new CheckBox
+            {
+                Appearance = Appearance.Button,
+                FlatStyle = FlatStyle.Flat,
+                Text = "🔓",
+                Font = new Font("Segoe UI Emoji", 8f),
+                TextAlign = ContentAlignment.MiddleCenter,
+                Size = new Size(24, 22),
+                Margin = new Padding(0, 2, 2, 0),
+                Anchor = AnchorStyles.Left,
+                ForeColor = Color.Gray,
+                Tag = key,
+            };
+            padlock.FlatAppearance.BorderSize = 0;
+            padlock.FlatAppearance.CheckedBackColor = Color.FromArgb(255, 226, 150);
+            var caption = new Label { Text = label, AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(0, 6, 0, 0) };
+            padlock.CheckedChanged += (_, _) =>
+            {
+                padlock.Text = padlock.Checked ? "🔒" : "🔓";
+                padlock.ForeColor = padlock.Checked ? Color.Black : Color.Gray;
+                caption.Font = new Font(Font, padlock.Checked ? FontStyle.Bold : FontStyle.Regular);
+                if (control is CheckBox box)
+                    box.Font = caption.Font;
+            };
+            lockTip.SetToolTip(padlock, lockHint ?? $"Locked: {label} is kept when you press Random. Unlocked: Random picks a new value.");
+            locks[key] = padlock;
+
             control.Dock = DockStyle.Fill;
-            left.Controls.Add(new Label { Text = label, AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(0, 6, 0, 0) });
+            left.Controls.Add(padlock);
+            left.Controls.Add(caption);
             left.Controls.Add(control);
         }
 
@@ -93,40 +141,38 @@ internal sealed class MainForm : Form
         chkTrails = new CheckBox { Text = "Dirt trails to tech and gems", AutoSize = true };
         chkWalls = new CheckBox { Text = "Sandbags around shared tech", AutoSize = true };
         nudSeed = new NumericUpDown { Minimum = 0, Maximum = int.MaxValue / 2 };
-        chkRandomSeed = new CheckBox { Text = "New random seed each time", AutoSize = true };
 
-        Row("Format", cbFormat);
-        Row("Style", cbStyle);
-        Row("Size", cbSize);
-        Row("Shape", cbShape);
-        Row("Layout", cbLayout);
-        Row("Symmetry", cbSymmetry);
+        Row("Format", "Format", cbFormat);
+        Row("Style", "Style", cbStyle);
+        Row("Size", "Size", cbSize);
+        Row("Shape", "Shape", cbShape);
+        Row("Layout", "Layout", cbLayout);
+        Row("Symmetry", "Symmetry", cbSymmetry);
         new ToolTip().SetToolTip(cbSymmetry, "None: lakes, cliffs and trees are not mirrored; bases, ore, tech and high ground still are, so the map stays fair.");
-        Row("Theater", cbTheater);
-        Row("Time of day", cbTime);
-        Row("Hills", tbHills);
-        Row("Cliffs", tbCliffs);
-        Row("Water", tbWater);
-        Row("Tree cover", tbTrees);
-        Row("Garrisons", tbGarrisons);
-        Row("", chkTrails);
-        Row("", chkWalls);
-        Row("Resources", cbResources);
-        Row("Ore fields %", tbOreSize);
-        Row("Gems", cbGems);
-        Row("Gem fields %", tbGemSize);
-        Row("Ore drills", tbDrills);
-        Row("Economy", cbEconomy);
-        Row("Seed", nudSeed);
-        Row("", chkRandomSeed);
+        Row("Theater", "Theater", cbTheater);
+        Row("Time", "Time of day", cbTime);
+        Row("Hills", "Hills", tbHills);
+        Row("Cliffs", "Cliffs", tbCliffs);
+        Row("Water", "Water", tbWater);
+        Row("Trees", "Tree cover", tbTrees);
+        Row("Garrisons", "Garrisons", tbGarrisons);
+        Row("Trails", "", chkTrails, "Locked: dirt trails are kept as set when you press Random.");
+        Row("Walls", "", chkWalls, "Locked: sandbags are kept as set when you press Random.");
+        Row("Resources", "Resources", cbResources);
+        Row("OreSize", "Ore fields %", tbOreSize);
+        Row("Gems", "Gems", cbGems);
+        Row("GemSize", "Gem fields %", tbGemSize);
+        Row("Drills", "Ore drills", tbDrills);
+        Row("Economy", "Economy", cbEconomy);
+        Row("Seed", "Seed", nudSeed, "Unlocked: a new seed on every Generate and Random. Locked: this seed is reused, so the same settings give the same map.");
 
         chkDefaultTech = new CheckBox { Text = "Default tech for the format", AutoSize = true };
         chkDefaultTech.CheckedChanged += (_, _) => OnDefaultTechChanged();
-        Row("Tech", chkDefaultTech);
+        Row("Tech", "Tech", chkDefaultTech, "Locked: the tech list below is kept when you press Random. Unlocked: Random picks a new set of tech buildings.");
 
         gridTech = BuildTechGrid();
         left.Controls.Add(gridTech);
-        left.SetColumnSpan(gridTech, 2);
+        left.SetColumnSpan(gridTech, 3);
 
         // The game directory stays visible above the scrolling settings: previews and copying to the
         // client need it, so a new user should see it first.
@@ -145,7 +191,7 @@ internal sealed class MainForm : Form
         game.Controls.Add(new Label { Text = "YR directory", AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(0, 6, 0, 0), Font = new Font(Font, FontStyle.Bold) });
         game.Controls.Add(gamePanel);
 
-        lblGameDirHint = new Label { AutoSize = true, MaximumSize = new Size(370, 0), Margin = new Padding(0, 2, 0, 6) };
+        lblGameDirHint = new Label { AutoSize = true, MaximumSize = new Size(400, 0), Margin = new Padding(0, 2, 0, 6) };
         game.Controls.Add(lblGameDirHint);
         game.SetColumnSpan(lblGameDirHint, 2);
         txtGameDir.TextChanged += (_, _) => UpdateGameDirHint();
@@ -158,7 +204,8 @@ internal sealed class MainForm : Form
 
         btnGenerate = new Button { Text = "Generate", Height = 40, Dock = DockStyle.Fill, Font = new Font(Font, FontStyle.Bold) };
         btnGenerate.Click += async (_, _) => await GenerateAsync();
-        btnRandom = new Button { Text = "All random", Height = 40, Dock = DockStyle.Fill };
+        btnRandom = new Button { Text = "Random", Height = 40, Dock = DockStyle.Fill };
+        new ToolTip().SetToolTip(btnRandom, "Rolls new values for every unlocked setting, then generates. Locked (🔒) settings are kept.");
         btnRandom.Click += async (_, _) => { RandomiseSettings(); await GenerateAsync(); };
         actions.Controls.Add(btnGenerate);
         actions.Controls.Add(btnRandom);
@@ -170,11 +217,14 @@ internal sealed class MainForm : Form
         btnCopyToClient.Click += (_, _) => CopyToClient();
         btnOpenFolder = new Button { Text = "Open folder", AutoSize = true, Enabled = false };
         btnOpenFolder.Click += (_, _) => { if (lastMapPath != null) Process.Start("explorer.exe", $"/select,\"{lastMapPath}\""); };
-        buttons.Controls.AddRange(new Control[] { btnSave, btnCopyToClient, btnOpenFolder });
+        chkReport = new CheckBox { Text = "Fairness report", Appearance = Appearance.Button, TextAlign = ContentAlignment.MiddleCenter, Margin = btnSave.Margin };
+        chkReport.Size = new Size(TextRenderer.MeasureText(chkReport.Text, Font).Width + 16, btnSave.PreferredSize.Height);
+        chkReport.CheckedChanged += (_, _) => previewSplit.Panel2Collapsed = !chkReport.Checked;
+        buttons.Controls.AddRange(new Control[] { btnSave, btnCopyToClient, btnOpenFolder, chkReport });
         actions.Controls.Add(buttons);
         actions.SetColumnSpan(buttons, 2);
 
-        lblStatus = new Label { AutoSize = true, MaximumSize = new Size(370, 0), ForeColor = Color.DimGray };
+        lblStatus = new Label { AutoSize = true, MaximumSize = new Size(400, 0), ForeColor = Color.DimGray };
         actions.Controls.Add(lblStatus);
         actions.SetColumnSpan(lblStatus, 2);
 
@@ -182,12 +232,22 @@ internal sealed class MainForm : Form
         left.BringToFront();
 
         // Preview and report.
-        var right = new SplitContainer { Dock = DockStyle.Fill, Orientation = Orientation.Horizontal };
+        var right = new SplitContainer { Dock = DockStyle.Fill, Orientation = Orientation.Horizontal, Panel2Collapsed = true };
+        previewSplit = right;
         split.Panel2.Controls.Add(right);
 
         picture = new ZoomImageBox { Dock = DockStyle.Fill, BackColor = Color.FromArgb(24, 24, 24) };
-        right.Panel1.Controls.Add(picture);
         new ToolTip().SetToolTip(picture, "Wheel to zoom, drag to pan, double-click to fit");
+
+        // Shown over the preview while a map is being made: a marquee bar and the current step.
+        busyOverlay = new Panel { Size = new Size(360, 70), BackColor = Color.FromArgb(40, 40, 40), Visible = false, Padding = new Padding(12) };
+        var bar = new ProgressBar { Style = ProgressBarStyle.Marquee, MarqueeAnimationSpeed = 30, Dock = DockStyle.Top, Height = 14 };
+        lblBusy = new Label { Dock = DockStyle.Fill, ForeColor = Color.Gainsboro, TextAlign = ContentAlignment.MiddleLeft, AutoEllipsis = true };
+        busyOverlay.Controls.Add(lblBusy);
+        busyOverlay.Controls.Add(bar);
+        right.Panel1.Controls.Add(busyOverlay);
+        right.Panel1.Controls.Add(picture);
+        right.Panel1.Resize += (_, _) => CentreBusyOverlay();
 
         txtReport = new TextBox
         {
@@ -203,8 +263,9 @@ internal sealed class MainForm : Form
         // Splitter distances can only be set once the containers have their real size.
         Load += (_, _) =>
         {
-            split.SplitterDistance = 390;
+            split.SplitterDistance = 420;
             right.SplitterDistance = Math.Max(200, right.Height - 230);
+            CentreBusyOverlay();
         };
 
         // With default tech selected, the grid shows what will be used for the current format.
@@ -310,9 +371,13 @@ internal sealed class MainForm : Form
         cbTime.SelectedItem = s.Time.ToString();
         tbTrees.Value = Percent(s.Trees);
         nudSeed.Value = Math.Clamp(s.Seed, 0, (int)nudSeed.Maximum);
-        chkRandomSeed.Checked = config.RandomSeed;
+        IEnumerable<string> locked = config.Locked ?? (IEnumerable<string>)AppConfig.DefaultLocked;
+        foreach (var (key, padlock) in locks)
+            padlock.Checked = locked.Contains(key, StringComparer.OrdinalIgnoreCase);
         txtGameDir.Text = config.GameDirectory ?? "";
         UpdateGameDirHint();
+        chkReport.Checked = config.ShowReport;
+        previewSplit.Panel2Collapsed = !config.ShowReport;
 
         FillTechGrid(s.Tech ?? new GeneratorSettings { Format = s.Format, Style = s.Style, Economy = s.Economy }.EffectiveTech());
         chkDefaultTech.Checked = config.DefaultTech || s.Tech == null;
@@ -355,8 +420,9 @@ internal sealed class MainForm : Form
     {
         config.Settings = ReadSettings();
         config.Settings.Tech = ReadTechGrid();
-        config.RandomSeed = chkRandomSeed.Checked;
+        config.Locked = locks.Where(l => l.Value.Checked).Select(l => l.Key).ToList();
         config.DefaultTech = chkDefaultTech.Checked;
+        config.ShowReport = chkReport.Checked;
         config.GameDirectory = txtGameDir.Text.Trim();
     }
 
@@ -407,12 +473,12 @@ internal sealed class MainForm : Form
     private void UpdateGameDirHint()
     {
         bool valid = PreviewRenderer.IsGameDirectory(txtGameDir.Text.Trim());
-        lblGameDirHint.Text = valid
-            ? "Previews are rendered with your game's art."
+        lblGameDirHint.Visible = !valid;
+        lblGameDirHint.Text = valid ? ""
             : string.IsNullOrWhiteSpace(txtGameDir.Text)
                 ? "Set your Yuri's Revenge (CnCNet) folder to see map previews and copy maps to the client."
                 : "No Yuri's Revenge game files found in this folder.";
-        lblGameDirHint.ForeColor = valid ? Color.DimGray : Color.Firebrick;
+        lblGameDirHint.ForeColor = Color.Firebrick;
     }
 
     private void BrowseGameDirectory()
@@ -428,7 +494,7 @@ internal sealed class MainForm : Form
 
     private async Task GenerateAsync()
     {
-        if (chkRandomSeed.Checked)
+        if (!IsLocked("Seed"))
             nudSeed.Value = Random.Shared.Next(1, 1_000_000);
 
         var settings = ReadSettings();
@@ -438,13 +504,17 @@ internal sealed class MainForm : Form
         config.Save();
 
         SetBusy(true, "Generating...");
+        // Progress<T> raises its callback on the UI thread.
+        IProgress<string> progress = new Progress<string>(step => { lblBusy.Text = step; lblStatus.Text = step; });
         try
         {
             string gameDir = txtGameDir.Text.Trim();
             var (result, mapPath, previewError) = await Task.Run(() =>
             {
+                progress.Report("Loading theater data...");
                 var (data, connected) = LoadTheater(settings.Theater);
-                var generated = new MapGenerator(data, connected).Generate(settings);
+                var generated = new MapGenerator(data, connected).Generate(settings, progress.Report);
+                progress.Report("Writing the map...");
 
                 Directory.CreateDirectory(workDir);
                 string path = Path.Combine(workDir, $"gen_{settings.FormatLabel}_{settings.Theater.ToLowerInvariant()}_{generated.Seed}.map");
@@ -528,40 +598,64 @@ internal sealed class MainForm : Form
         lblStatus.Text = $"Copied to {target} (pick it from the custom maps list in the client)";
     }
 
+    private bool IsLocked(string key) => locks.TryGetValue(key, out var padlock) && padlock.Checked;
+
+    private void SetAllLocks(bool locked)
+    {
+        foreach (var padlock in locks.Values)
+            padlock.Checked = locked;
+    }
+
     /// <summary>
-    /// Randomises everything except the format, style and economy, within ranges that make playable
-    /// maps, with random tech to match.
+    /// Rolls a new value for every unlocked setting, within ranges that make playable maps. Locked
+    /// settings keep their value, so a player can ask for "anything, as long as the gems are big".
     /// </summary>
     private void RandomiseSettings()
     {
         var r = Random.Shared;
         T Pick<T>(params T[] items) => items[r.Next(items.Length)];
-        void Choose(ComboBox cb, string item) => cb.SelectedItem = item;
+        void Choose(string key, ComboBox cb, string item) { if (!IsLocked(key)) cb.SelectedItem = item; }
+        void Slide(string key, TrackBar tb, int min, int max) { if (!IsLocked(key)) tb.Value = r.Next(min, max); }
+        void Tick(string key, CheckBox chk, double chance) { if (!IsLocked(key)) chk.Checked = r.NextDouble() < chance; }
 
-        Choose(cbSize, Pick("Small", "Medium", "Medium", "Large"));
-        Choose(cbShape, nameof(MapShape.Random));
+        // Format first: the symmetry choices and default tech depend on it.
+        if (!IsLocked("Format"))
+            cbFormat.SelectedIndex = r.Next(cbFormat.Items.Count);
+        Choose("Style", cbStyle, Pick("Standard", "Standard", "Standard", "Blitz"));
+        Choose("Economy", cbEconomy, Pick("Ore", "Ore", "Ore", "Ore", "Mixed", "OilOnly"));
+        Choose("Size", cbSize, Pick("Small", "Medium", "Medium", "Large"));
+        Choose("Shape", cbShape, Pick("Random", "Random", "Random", "Wide", "Square", "Tall"));
         // Mostly land maps; island layouts are naval games, so rarer.
-        Choose(cbLayout, Pick("Land", "Land", "Land", "Land", "Continent", "TeamIslands", "PlayerIslands", "Archipelago", "Mountainous"));
-        RefreshSymmetryChoices("Auto");
-        Choose(cbSymmetry, r.NextDouble() < 0.5 ? "Auto" : (string)cbSymmetry.Items[r.Next(cbSymmetry.Items.Count)]);
-        cbTheater.SelectedIndex = r.Next(Theaters.Length - 1); // not Lunar (no cliffs or water)
-        Choose(cbTime, Pick("Day", "Day", "Dusk", "Night"));
-        tbHills.Value = r.Next(10, 90);
-        tbCliffs.Value = r.Next(15, 95);
-        tbWater.Value = r.Next(0, 80);
-        tbTrees.Value = r.Next(20, 85);
-        tbGarrisons.Value = r.Next(0, 100);
-        chkTrails.Checked = r.NextDouble() < 0.8;
-        chkWalls.Checked = r.NextDouble() < 0.7;
-        Choose(cbResources, Pick("Low", "Medium", "Medium", "High", "VeryHigh"));
-        tbOreSize.Value = r.Next(70, 170);
-        Choose(cbGems, Pick("None", "PerPlayer", "PerPlayer", "Contested", "Both"));
-        tbGemSize.Value = r.Next(70, 170);
-        tbDrills.Value = r.Next(60, 101);
-        chkDefaultTech.Checked = false;
-        FillTechGrid(RandomTech(r));
+        Choose("Layout", cbLayout, Pick("Land", "Land", "Land", "Land", "Continent", "TeamIslands", "PlayerIslands", "Archipelago", "Mountainous"));
+        if (!IsLocked("Symmetry"))
+        {
+            RefreshSymmetryChoices("Auto");
+            cbSymmetry.SelectedItem = r.NextDouble() < 0.5 ? "Auto" : (string)cbSymmetry.Items[r.Next(cbSymmetry.Items.Count)];
+        }
+        if (!IsLocked("Theater"))
+            cbTheater.SelectedIndex = r.Next(Theaters.Length - 1); // not Lunar (no cliffs or water)
+        Choose("Time", cbTime, Pick("Day", "Day", "Dusk", "Night"));
+        Slide("Hills", tbHills, 10, 90);
+        Slide("Cliffs", tbCliffs, 15, 95);
+        Slide("Water", tbWater, 0, 80);
+        Slide("Trees", tbTrees, 20, 85);
+        Slide("Garrisons", tbGarrisons, 0, 100);
+        Tick("Trails", chkTrails, 0.8);
+        Tick("Walls", chkWalls, 0.7);
+        Choose("Resources", cbResources, Pick("Low", "Medium", "Medium", "High", "VeryHigh"));
+        Slide("OreSize", tbOreSize, 70, 170);
+        Choose("Gems", cbGems, Pick("None", "PerPlayer", "PerPlayer", "Contested", "Both"));
+        Slide("GemSize", tbGemSize, 70, 170);
+        Slide("Drills", tbDrills, 60, 101);
+        if (!IsLocked("Tech"))
+        {
+            // Now and then the format's default tech; usually a fresh random set.
+            bool useDefault = r.NextDouble() < 0.25;
+            chkDefaultTech.Checked = useDefault;
+            if (!useDefault)
+                FillTechGrid(RandomTech(r));
+        }
         OnDefaultTechChanged();
-        chkRandomSeed.Checked = true;
     }
 
     /// <summary>A random but sensible set of tech rules: oil for the economy setting, plus a few extras.</summary>
@@ -616,7 +710,22 @@ internal sealed class MainForm : Form
         btnCopyToClient.Enabled = haveMap;
         btnOpenFolder.Enabled = haveMap;
         lblStatus.Text = status;
+        lblBusy.Text = status;
+        busyOverlay.Visible = busy;
+        if (busy)
+        {
+            CentreBusyOverlay();
+            busyOverlay.BringToFront();
+        }
         UseWaitCursor = busy;
+    }
+
+    private void CentreBusyOverlay()
+    {
+        var host = busyOverlay.Parent;
+        if (host == null)
+            return;
+        busyOverlay.Location = new Point((host.ClientSize.Width - busyOverlay.Width) / 2, (host.ClientSize.Height - busyOverlay.Height) / 2);
     }
 
     private (TheaterData, List<ConnectedTileType>) LoadTheater(string theater)
