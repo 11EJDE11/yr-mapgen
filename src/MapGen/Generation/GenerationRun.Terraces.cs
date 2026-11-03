@@ -193,6 +193,34 @@ internal sealed partial class GenerationRun
         }
         ForceLevels();
 
+        // Raised bases need a lowland valley between enemies. If two enemies' base areas touch there
+        // is no room for one, and they would end up on a shared shelf:
+        // the bases go on the lowland instead.
+        if (basesRaised)
+        {
+            int TeamAt(int i, int j) => players.OrderBy(pl => pl.Position.DistanceTo(BlockCentre(i, j))).First().Team;
+            bool tooClose = false;
+            for (int i = 0; i < blockCount && !tooClose; i++)
+                for (int j = 0; j < blockCount && !tooClose; j++)
+                {
+                    if (!forcedBase[i, j])
+                        continue;
+                    for (int di = -1; di <= 1 && !tooClose; di++)
+                        for (int dj = -1; dj <= 1 && !tooClose; dj++)
+                        {
+                            int x = i + di, y = j + dj;
+                            tooClose = x >= 0 && y >= 0 && x < blockCount && y < blockCount && forcedBase[x, y] && TeamAt(x, y) != TeamAt(i, j);
+                        }
+                }
+            if (tooClose)
+            {
+                terraceShape = TerraceShape.Rolling;
+                basesRaised = false;
+                forcedBase = new bool[blockCount, blockCount];
+                ForceLevels();
+            }
+        }
+
         // Clean up: fill one-block gaps, then drop one-block spurs and specks, so every border run is at
         // least two blocks long and no two terraces touch at a corner.
         if (debugLevels)
@@ -311,8 +339,9 @@ internal sealed partial class GenerationRun
     /// </summary>
     private void SeparateRegions()
     {
-        // Two base shelves too close for separate cliffs become one shelf: the blocks between them
-        // are raised first (symmetric, since the shelves are).
+        // Two teammates' shelves too close for separate cliffs become one shelf: the blocks between
+        // them are raised first (symmetric, since the shelves are). Enemies never share a shelf.
+        int TeamOf(int i, int j) => players.OrderBy(pl => pl.Position.DistanceTo(BlockCentre(i, j))).First().Team;
         for (int i = 0; i < blockCount; i++)
             for (int j = 0; j < blockCount; j++)
             {
@@ -322,7 +351,8 @@ internal sealed partial class GenerationRun
                     for (int dj = -2; dj <= 2; dj++)
                     {
                         int x = i + di, y = j + dj;
-                        if (x < 0 || y < 0 || x >= blockCount || y >= blockCount || !forcedBase[x, y] || (di == 0 && dj == 0))
+                        if (x < 0 || y < 0 || x >= blockCount || y >= blockCount || !forcedBase[x, y] || (di == 0 && dj == 0)
+                            || TeamOf(x, y) != TeamOf(i, j))
                             continue;
                         for (int a = Math.Min(i, x); a <= Math.Max(i, x); a++)
                             for (int b = Math.Min(j, y); b <= Math.Max(j, y); b++)

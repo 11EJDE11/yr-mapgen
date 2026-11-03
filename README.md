@@ -1,7 +1,28 @@
 # yr-mapgen
 
-Random map generator for Red Alert 2: Yuri's Revenge. Makes symmetric multiplayer maps, measures them
-for fairness and re-rolls until they pass. Also analyses existing maps.
+Random map generator for Red Alert 2: Yuri's Revenge. Makes multiplayer maps that are symmetric or
+deliberately uneven, measures them for fairness and re-rolls until they pass. Also analyses existing maps.
+
+![A 2v2 with each team on its own raised shelf](docs/images/highland-2v2.jpg)
+
+![A 4v4 split by a river with bridges](docs/images/river-4v4.jpg)
+
+More in the [gallery](docs/gallery.md): island layouts, mesas, cities, night maps, asymmetric maps.
+
+## What it makes
+
+- **Terrain:** raised terraces with long cliff lines and ramps where the routes cross. Bases can sit on
+  their own shelf (highland) or the centre can be raised (mesa). Plateaus and ridges, tactical
+  overlooks and gateways on the approaches, hills, lakes, rivers with bridges, island layouts.
+- **Economy:** per-player ore and gem fields, contested and centre fields, ore drills, oil derricks.
+  Gems and contested tech favour high ground worth taking.
+- **Tech:** oil, repair, hospital, airport, machine shop, power, secret lab, placed per player, per team,
+  contested or in the centre. Some contested oil comes walled in.
+- **Dressing:** dirt or paved trails from each base to its own tech and gems and on to teammates and the
+  centre, villages along them with fences, garrisons, props, street lamps at night, parked cars,
+  craters, ground patches blended into each other, day, dusk or night lighting.
+- **Fairness:** every map is measured (resources in reach, tech distances, buildable area, routes) and
+  re-rolled until equivalent starts match. Asymmetry and Fairness sliders trade exact copies for variety.
 
 ## Download
 
@@ -70,7 +91,7 @@ Each tech rule has:
    symmetric. With `asymmetry` above 0 a smooth drift field pushes every copy of a start, field, tech
    building and plateau off its mirror position (up to about 9 cells at 1), fields are regrown with
    their own shapes, hills are sampled off their mirror cells, and the scenery is free as with `none`.
-   The fairness check (with a tolerance widened by up to half) and re-rolling then keep the sides equal.
+   The fairness check (with a tolerance widened by up to double) and re-rolling then keep the sides equal.
 2. **Starts.** Per-format templates, each with a protected base area.
 3. **Terrain.** With the `terraced` cliff style the map is first divided into a grid of 14-cell blocks,
    each lowland or raised terrace (highland maps raise the bases with a valley between the sides, mesa
