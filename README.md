@@ -37,7 +37,8 @@ yr-mapgen analyze "Maps/Yuri's Revenge/tourofegypt.map"
 | `--asymmetry` | 0..1. 0: exact copies. Higher: each side's starts, fields, tech and high ground drift off their mirror spots and take their own shapes; scenery is not mirrored. Fairness is enforced by measuring |
 | `--fairness` | 0..1. How strictly equivalent starts must match: 1 = within about 15%, 0 = four times looser (asymmetric maps settle sooner) |
 | `--theater` | `temperate`, `snow`, `urban`, `newurban`, `desert`, `lunar` |
-| `--hills`, `--cliffs`, `--water`, `--trees` | 0..1 |
+| `--hills`, `--cliffs`, `--water`, `--trees`, `--villages` | 0..1 |
+| `--rivers` | `yes`: a river across the map between the sides with low bridges where the routes cross it; the centre stays a ford (land layouts) |
 | `--cliffstyle` | `mixed` (per map), `terraced` (a few large height regions with long cliff lines along their borders and ramps where the routes cross; highland maps raise the bases, mesa maps the centre), `scenic` (plateaus off the routes), `tactical` (ridge walls with a gateway across each approach, ramped plateaus beside the route facing the owner) |
 | `--resources` | `low`, `medium`, `high`, `veryhigh` |
 | `--orefields`, `--gemfields` | size multiplier (1 = default) |
@@ -79,8 +80,9 @@ Each tech rule has:
 4. **Resources.** Per player: main, secondary and optional gem field. Shared contested and centre
    fields. Sizes calibrated against popular maps.
 5. **Tech.** Placed per player, per team, contested or centre (exactly one).
-6. **Decoration.** Sandbags round shared tech, garrisons, dirt trails, trees, rocks, LAT patches,
-   craters, ore drills.
+6. **Decoration.** Sandbags round shared tech, garrisons, villages (civilian buildings on a short road
+   with a fence), dirt trails from each base to its own tech and gems, towards the centre and to the
+   nearest teammate, trees, rocks, LAT patches, craters, ore drills.
 7. **Connectivity.** Starts connect through corridors at least 3 cells wide; every field and building
    is reachable.
 8. **Verification.** The fairness analyser compares equivalent starts and team totals. Failures are

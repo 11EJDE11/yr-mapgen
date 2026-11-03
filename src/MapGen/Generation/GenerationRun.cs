@@ -85,7 +85,7 @@ internal sealed partial class GenerationRun
         ["CreateMap"] = "creating the map", ["PlaceStarts"] = "placing starts", ["ReserveBases"] = "reserving bases",
         ["PlanTerrain"] = "shaping terrain", ["SharedTech"] = "placing shared tech", ["Resources"] = "placing resources",
         ["PlayerTech"] = "placing player tech", ["TechWalls"] = "building sandbags", ["Garrisons"] = "placing garrisons",
-        ["Trails"] = "laying trails", ["Obstacles"] = "growing forests", ["Scatter"] = "scattering trees and rocks",
+        ["Villages"] = "building villages", ["Trails"] = "laying trails", ["Obstacles"] = "growing forests", ["Scatter"] = "scattering trees and rocks",
         ["Connectivity"] = "checking routes", ["Trees"] = "planting trees", ["Realize"] = "writing tiles",
         ["Analyze"] = "measuring fairness",
     };
@@ -114,6 +114,7 @@ internal sealed partial class GenerationRun
         Step("PlayerTech", () => PlaceTech(shared: false));
         Step("TechWalls", PlaceTechWalls);
         Step("Garrisons", PlaceGarrisons);
+        Step("Villages", PlaceVillages);
         Step("Trails", PlaceTrails);
         Step("Obstacles", PlaceObstacles);
         Step("Scatter", PlaceScatter);
@@ -156,6 +157,10 @@ internal sealed partial class GenerationRun
         cliffStyle = settings.CliffStyle == CliffStyle.Mixed
             ? (styleRoll < 0.65 ? CliffStyle.Terraced : styleRoll < 0.85 ? CliffStyle.Tactical : CliffStyle.Scenic)
             : settings.CliffStyle;
+        // A river needs the open lowland of the scenic and tactical styles.
+        bool riverMap = settings.Rivers && settings.Layout == MapLayout.Land && settings.Format != MatchFormat.FourTeamsOfTwo;
+        if (riverMap && cliffStyle == CliffStyle.Terraced)
+            cliffStyle = styleRoll < 0.5 ? CliffStyle.Tactical : CliffStyle.Scenic;
         if (cliffStyle == CliffStyle.Terraced)
         {
             double shapeRoll = styleRng.NextDouble();

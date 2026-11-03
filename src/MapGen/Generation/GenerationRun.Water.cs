@@ -47,6 +47,9 @@ internal sealed partial class GenerationRun
         var components = Components(land);
         var shoreCells = new HashSet<CellPos>();
         var lakeWater = new HashSet<CellPos>();
+        if (riverCells != null && Environment.GetEnvironmentVariable("MAPGEN_DEBUG") == "1")
+            foreach (var comp in components.Where(c => c.Any(riverCells.Contains)))
+                Console.Error.WriteLine($"RIVER component of {comp.Count} cells, {(comp.Any(p => !IsUsable(p) || !map.IsInLocal(p, 3)) ? "touches the edge" : "inside")}");
 
         foreach (var comp in components)
         {
@@ -56,18 +59,27 @@ internal sealed partial class GenerationRun
                 continue; // the open land of Inland maps, or the ocean around islands
 
             // One representative per symmetric orbit of bodies: plan it there and copy the outline.
+            // A bent body's centroid may lie outside it: the nearest body cell stands in.
             var centroid = new CellPos((int)Math.Round(comp.Average(p => p.X)), (int)Math.Round(comp.Average(p => p.Y)));
             var set = comp.ToHashSet();
+            if (!set.Contains(centroid))
+                centroid = comp.OrderBy(p => p.DistanceTo(centroid)).First();
             // The symmetries that map this body onto itself (e.g. a lake straddling one mirror axis).
             var stabilizer = Enumerable.Range(0, coastSym.Order).Where(t => set.Contains(coastSym.Apply(t, centroid))).ToList();
             bool selfSymmetric = stabilizer.Count > 1;
             if (!selfSymmetric && !coastSym.IsCanonical(centroid))
                 continue;
 
-            if (!PlaceShoreLoops(set, centroid, isLand, stabilizer, shoreCells, lakeWater))
+            bool shoreOk = PlaceShoreLoops(set, centroid, isLand, stabilizer, shoreCells, lakeWater);
+            if (riverCells != null && Environment.GetEnvironmentVariable("MAPGEN_DEBUG") == "1" && set.Overlaps(riverCells))
+                Console.Error.WriteLine($"RIVER body of {set.Count} cells ({(isLand ? "land" : "water")}, stabilizer {stabilizer.Count}): shore {(shoreOk ? "ok" : "FAILED")}");
+            if (!shoreOk)
             {
                 if (isLand && IsIslandLayout && players.Any(pl => set.Contains(pl.Position)))
                     throw new GenerationFailedException("Could not build the shore around a player's island");
+                // Half a river is unfair: the other half may well have been built.
+                if (riverCells != null && set.Overlaps(riverCells))
+                    throw new GenerationFailedException("Could not build the river's shore");
                 // A small lake or islet that will not plan is simply left out.
             }
         }
@@ -102,6 +114,8 @@ internal sealed partial class GenerationRun
         }
 
         FillWater(lakeWater);
+        if (riverCells != null)
+            riverCells.IntersectWith(lakeWater);
     }
 
     /// <summary>
@@ -184,6 +198,56 @@ internal sealed partial class GenerationRun
             lakeThreshold = values[(int)Math.Clamp((1 - 0.38 * water) * (values.Count - 1), 0, values.Count - 1)];
         }
 
+        // A river between the sides: a gently winding band through the centre, across the line
+        // between the teams, ending inside the playable area so it is a lake with shores. The centre
+        // stays dry (a ford at the most contested spot); the other routes get bridges. Units are
+        // screen half-steps (one unit is about 1.4 cells).
+        bool river = settings.Rivers && settings.Layout == MapLayout.Land && settings.Format != MatchFormat.FourTeamsOfTwo && sym.Kind != SymmetryKind.Diamond;
+        int c0 = map.Width + map.Height;
+        const double Wobble = 6;
+        // A mirror symmetry only allows a river along its axis (a cell diagonal, which bridges cross at
+        // 45 degrees, so it is kept narrower). A rotation also allows a river along a cell axis, which
+        // gives short straight bridges. Of the lines allowed, the one that keeps every base furthest
+        // from the water is used; if even that one runs through a base there is no river.
+        var lines = new List<(Func<CellPos, double> Off, Func<CellPos, double> Along, double HalfWidth, string Name)>
+        {
+            (c => (splitTopBottom ? c.X + c.Y - c0 : c.X - c.Y) / 2.0, c => (splitTopBottom ? c.X - c.Y : c.X + c.Y - c0) / 2.0, 3.5 + 1.5 * water, "diagonal"),
+        };
+        if (sym.Kind == SymmetryKind.Rotate180)
+        {
+            lines.Add((c => c.Y - c0 / 2.0, c => c.X - c0 / 2.0, 5.0 + 2.0 * water, "along x"));
+            lines.Add((c => c.X - c0 / 2.0, c => c.Y - c0 / 2.0, 5.0 + 2.0 * water, "along y"));
+        }
+        var riverLine = lines.OrderByDescending(l => players.Min(pl => Math.Abs(l.Off(pl.Position))) - l.HalfWidth).First();
+        var (Off, Along, halfWidth, lineName) = riverLine;
+        double need = halfWidth + Wobble + BaseRadius + 6;
+        if (river && players.Any(pl => Math.Abs(Off(pl.Position)) < need))
+        {
+            if (Environment.GetEnvironmentVariable("MAPGEN_DEBUG") == "1")
+                Console.Error.WriteLine($"RIVER skipped: a base is too close to the middle of the map ({lineName}: offsets {string.Join(" ", players.Select(pl => Math.Abs(Off(pl.Position)).ToString("0")))}, need {need:0})");
+            river = false;
+        }
+        else if (river && Environment.GetEnvironmentVariable("MAPGEN_DEBUG") == "1")
+            Console.Error.WriteLine($"RIVER {lineName}, half width {halfWidth:0.#}");
+        riverCells = river ? new HashSet<CellPos>() : null;
+        // How far along its axis the river runs before the playable edge (shortest side).
+        double riverReach = river ? map.AllValidCells().Where(p => map.IsInLocal(p, 7)).Max(p => Math.Abs(Along(p))) : 0;
+        bool InRiver(CellPos p)
+        {
+            if (!river || !map.IsInLocal(p, 7))
+                return false;
+            // The band is symmetric by construction; the wobble is sampled on the canonical cell so the
+            // copies match (for a rotation that is the same |along|).
+            var c = coastSym.Canonical(p);
+            double along = Math.Abs(Along(c));
+            // Straight through the centre (the ford must cut the river in two), winding further out.
+            double wobble = (ValueNoise(along / 22.0, 0.37, seed + 11) * 2 - 1) * Wobble * Math.Clamp((along - 6) / 14.0, 0, 1);
+            // The ends taper to a point over the last dozen cells before the playable edge.
+            double toEdge = riverReach - along;
+            double width = halfWidth * Math.Clamp(toEdge / 12.0, 0.25, 1);
+            return toEdge > 0 && Math.Abs(Off(p) - wobble) < width;
+        }
+
         foreach (var p in map.AllValidCells())
         {
             var c = coastSym.Canonical(p);
@@ -239,6 +303,11 @@ internal sealed partial class GenerationRun
                 {
                     // Land with lakes: the highest values of a broad noise field become water.
                     isLand = LakeNoise(c) < lakeThreshold;
+                    if (InRiver(p))
+                    {
+                        isLand = false;
+                        riverCells.Add(p);
+                    }
                     break;
                 }
             }
@@ -263,11 +332,29 @@ internal sealed partial class GenerationRun
         // Free lakes stay off the lanes (island coasts are mirrored, so they need not), and off the
         // terraces and their borders, where the cliffs go.
         foreach (var p in map.AllValidCells())
-            if (!IsIslandLayout && OnLane(p) || raised != null && (IsRaisedCell(p) || nearTerraceEdge[p.X, p.Y]))
+            if (!IsIslandLayout && OnLane(p) && !(riverCells?.Contains(p) ?? false) || raised != null && (IsRaisedCell(p) || nearTerraceEdge[p.X, p.Y]))
                 land[p.X, p.Y] = true;
+            else if (riverCells != null && riverCells.Contains(p) && players.All(pl => pl.Position.DistanceTo(p) >= BaseRadius + 6) && p.DistanceTo(MapCentre()) >= 6)
+                land[p.X, p.Y] = false;
+
+        if (riverCells != null && Environment.GetEnvironmentVariable("MAPGEN_DEBUG_MASK") == "1")
+        {
+            Console.Error.WriteLine($"RIVER mask ({(splitTopBottom ? "top/bottom split" : "left/right split")}, centre {MapCentre()}, starts {string.Join(" ", players.Select(pl => pl.Position))}):");
+            for (int y = 0; y < map.Span; y += 3)
+            {
+                var row = new System.Text.StringBuilder();
+                for (int x = 0; x < map.Span; x += 2)
+                {
+                    var q = new CellPos(x, y);
+                    row.Append(!map.IsValid(q) ? ' ' : players.Any(pl => pl.Position.DistanceTo(q) < 3) ? 'S' : q.DistanceTo(MapCentre()) < 3 ? 'C' : riverCells.Contains(q) ? (land[x, y] ? 'r' : '~') : land[x, y] ? '.' : 'o');
+                }
+                Console.Error.WriteLine(row.ToString());
+            }
+        }
 
         // Inland lakes must not cut the players off from each other: open land bridges if they do.
-        if (settings.Layout == MapLayout.Land)
+        // A river is meant to: its crossings are the bridges.
+        if (settings.Layout == MapLayout.Land && riverCells == null)
             BridgeLakes(land);
 
         return land;
@@ -418,10 +505,15 @@ internal sealed partial class GenerationRun
         if (body.Count < (isLand ? 40 : 85) || !body.Contains(centroid))
             return false;
 
-        // Rays every ~12 degrees; the vertex sits two cells inside the body's edge along the ray.
-        var vertices = new List<CellPos>();
+        // Rays every ~12 degrees; the vertex sits two cells inside the body's edge along the ray. A long
+        // thin body (a river) is not star-shaped from its centroid: it gets a ribbon outline instead.
+        bool isRiver = riverCells != null && body.Overlaps(riverCells);
+        var vertices = RibbonOutline(body, isLand, force: isRiver) ?? new List<CellPos>();
+        bool useRays = vertices.Count == 0;
+        if (Environment.GetEnvironmentVariable("MAPGEN_DEBUG") == "1" && body.Count > 150)
+            Console.Error.WriteLine($"  shore outline for {body.Count} cells: {(useRays ? "rays" : "ribbon " + vertices.Count)}");
         int rays = Math.Clamp((int)(Math.Sqrt(body.Count) * 2.2), 10, 36);
-        for (int i = 0; i < rays; i++)
+        for (int i = 0; i < rays && useRays; i++)
         {
             double a = i * 2 * Math.PI / rays;
             double dx = Math.Cos(a), dy = Math.Sin(a);
@@ -437,7 +529,18 @@ internal sealed partial class GenerationRun
         }
 
         var outlines = new List<(List<CellPos> Vertices, CellPos Centre)>();
-        if (stabilizer.Count > 1)
+        if (!useRays)
+        {
+            // A ribbon follows the body, which is symmetric already; mirroring its vertices would only
+            // zigzag the outline. Copies of a non-self-symmetric body still need their own outlines.
+            if (stabilizer.Count > 1)
+                outlines.Add((vertices, centroid));
+            else
+                for (int t = 0; t < coastSym.Order; t++)
+                    outlines.Add((vertices.Select(v => coastSym.Apply(t, v)).ToList(), coastSym.Apply(t, centroid)));
+            outlines = outlines.DistinctBy(o => o.Centre).ToList();
+        }
+        else if (stabilizer.Count > 1)
         {
             // Every vertex together with its images under the body's own symmetries, thinned so
             // neighbours are at least 4 cells apart: the outline is (nearly exactly) symmetric.
@@ -466,6 +569,65 @@ internal sealed partial class GenerationRun
         return TryPlanShores(shrunk, body, isLand, shoreCells, lakeWater);
     }
 
+    /// <summary>
+    /// For a body much longer than it is wide: vertices along one edge, then back along the other,
+    /// sampled every few cells along the body's principal axis. Null for a compact body.
+    /// </summary>
+    private static List<CellPos> RibbonOutline(HashSet<CellPos> body, bool isLand, bool force = false)
+    {
+        double cx = body.Average(p => p.X), cy = body.Average(p => p.Y);
+        double sxx = 0, syy = 0, sxy = 0;
+        foreach (var p in body)
+        {
+            sxx += (p.X - cx) * (p.X - cx);
+            syy += (p.Y - cy) * (p.Y - cy);
+            sxy += (p.X - cx) * (p.Y - cy);
+        }
+        // Principal axis of the covariance.
+        double theta = 0.5 * Math.Atan2(2 * sxy, sxx - syy);
+        double ax = Math.Cos(theta), ay = Math.Sin(theta);
+        double l1 = 0, l2 = 0;
+        foreach (var p in body)
+        {
+            double a = (p.X - cx) * ax + (p.Y - cy) * ay, b = -(p.X - cx) * ay + (p.Y - cy) * ax;
+            l1 += a * a;
+            l2 += b * b;
+        }
+        if (l2 <= 0 || !force && Math.Sqrt(l1 / l2) < 2.5)
+            return null;
+
+        // Slabs along the axis: the extreme perpendicular offsets in each.
+        const double Step = 6;
+        var slabs = new SortedDictionary<int, (double Min, double Max)>();
+        foreach (var p in body)
+        {
+            double a = (p.X - cx) * ax + (p.Y - cy) * ay, b = -(p.X - cx) * ay + (p.Y - cy) * ax;
+            int k = (int)Math.Floor(a / Step);
+            slabs[k] = slabs.TryGetValue(k, out var e) ? (Math.Min(e.Min, b), Math.Max(e.Max, b)) : (b, b);
+        }
+        double inset = isLand ? 2 : 2.5;
+        var top = new List<CellPos>();
+        var bottom = new List<CellPos>();
+        foreach (var (k, (min, max)) in slabs)
+        {
+            if (max - min < 2 * inset + 1)
+                continue;
+            double a = (k + 0.5) * Step;
+            top.Add(new CellPos((int)Math.Round(cx + a * ax - (max - inset) * ay), (int)Math.Round(cy + a * ay + (max - inset) * ax)));
+            bottom.Add(new CellPos((int)Math.Round(cx + a * ax - (min + inset) * ay), (int)Math.Round(cy + a * ay + (min + inset) * ax)));
+        }
+        if (top.Count < 2)
+            return null;
+        bottom.Reverse();
+        var outline = top.Concat(bottom).ToList();
+        // No two consecutive vertices alike, and only ones inside the body.
+        var result = new List<CellPos>();
+        foreach (var v in outline)
+            if (body.Contains(v) && (result.Count == 0 || result[^1] != v))
+                result.Add(v);
+        return result.Count >= 4 ? result : null;
+    }
+
     private bool TryPlanShores(List<(List<CellPos> Vertices, CellPos Centre)> outlines, HashSet<CellPos> body, bool isLand,
         HashSet<CellPos> shoreCells, HashSet<CellPos> lakeWater)
     {
@@ -481,7 +643,14 @@ internal sealed partial class GenerationRun
         foreach (var (outline, centre) in outlines)
         {
             if (outline.Count < 3 || !outline.All(Valid))
+            {
+                if (Environment.GetEnvironmentVariable("MAPGEN_DEBUG") == "1" && body.Count > 150)
+                {
+                    var bad = outline.FirstOrDefault(v => !Valid(v));
+                    Console.Error.WriteLine($"  outline vertex {bad} invalid: {(map.IsValid(bad) ? zone[bad.X, bad.Y].ToString() + (OnLane(bad) ? " lane" : "") + (map.IsInLocal(bad, 2) ? "" : " edge") + (claimed.Contains(bad) ? " claimed" : "") : "off map")}");
+                }
                 return false;
+            }
 
             ConnectedTilePlan plan = null;
             HashSet<CellPos> inside = null;
@@ -501,7 +670,11 @@ internal sealed partial class GenerationRun
                 break;
             }
             if (plan == null)
+            {
+                if (Environment.GetEnvironmentVariable("MAPGEN_DEBUG") == "1" && body.Count > 150)
+                    Console.Error.WriteLine($"  no shore plan for outline of {outline.Count} vertices");
                 return false;
+            }
 
             claimed.UnionWith(FoundationCells(plan.Placements));
             planned.Add((plan, inside));

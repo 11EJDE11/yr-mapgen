@@ -62,6 +62,9 @@ internal sealed partial class GenerationRun
         heights = new HeightField(map, theater);
         heights.Build(targetLevel, tilePlaced);
         heights.Relax();
+
+        // Bridges need the ground levels at their ends.
+        PlaceBridges();
     }
 
     /// <summary>Flat, non-cliff ground (needed for ore, buildings and bases).</summary>

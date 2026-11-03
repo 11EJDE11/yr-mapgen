@@ -158,6 +158,12 @@ public sealed class GeneratorSettings
     /// <summary>0..1: garrisonable civilian buildings between the sides.</summary>
     public double Garrisons { get; set; } = 0.5;
 
+    /// <summary>0..1: villages (a few civilian buildings on a short road with a fence) near the contested ground.</summary>
+    public double Villages { get; set; } = 0.5;
+
+    /// <summary>A river across the map between the sides, with low bridges where the routes cross it (land layouts only).</summary>
+    public bool Rivers { get; set; }
+
     /// <summary>Dirt trails from bases towards tech and gem fields.</summary>
     public bool Trails { get; set; } = true;
 

@@ -77,6 +77,8 @@ internal static class Program
                 case "gemfields": settings.GemFieldSize = double.Parse(value, System.Globalization.CultureInfo.InvariantCulture); break;
                 case "drills": settings.Drills = double.Parse(value, System.Globalization.CultureInfo.InvariantCulture); break;
                 case "trees": settings.Trees = double.Parse(value, System.Globalization.CultureInfo.InvariantCulture); break;
+                case "villages": settings.Villages = double.Parse(value, System.Globalization.CultureInfo.InvariantCulture); break;
+                case "rivers": settings.Rivers = value is "1" or "true" or "yes"; break;
                 case "time": settings.Time = Enum.Parse<TimeOfDay>(value, true); break;
                 case "name": settings.Name = value; break;
                 case "attempts": settings.MaxAttempts = int.Parse(value); break;
@@ -147,7 +149,8 @@ internal static class Program
         Console.WriteLine("                   [--resources low|medium|high|veryhigh] [--gems none|perplayer|contested|both]");
         Console.WriteLine("                   [--economy ore|oilonly|mixed] [--hills|--cliffs|--water 0..1] [--cliffstyle mixed|scenic|tactical|terraced]");
         Console.WriteLine("                   [--symmetry rotate180|mirrorleftright|mirrortopbottom|quad|diamond|none]");
-        Console.WriteLine("                   [--asymmetry 0..1] [--fairness 0..1] [--trees 0..1] [--time day|dusk|night] [--seed N] [--count N] [--out path]");
+        Console.WriteLine("                   [--asymmetry 0..1] [--fairness 0..1] [--trees 0..1] [--villages 0..1] [--rivers yes|no]");
+        Console.WriteLine("                   [--time day|dusk|night] [--seed N] [--count N] [--out path]");
         Console.WriteLine("                   [--game <YR directory>]   (renders the embedded preview with LightningMap)");
     }
 

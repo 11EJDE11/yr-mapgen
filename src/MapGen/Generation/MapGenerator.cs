@@ -110,6 +110,7 @@ public sealed class MapGenerator
                 Size = settings.Size, Shape = settings.Shape, Layout = settings.Layout, Resources = settings.Resources, Gems = settings.Gems,
                 OreFieldSize = settings.OreFieldSize, GemFieldSize = settings.GemFieldSize, Drills = settings.Drills, Economy = settings.Economy,
                 Hills = settings.Hills, Cliffs = settings.Cliffs, CliffStyle = settings.CliffStyle, Water = settings.Water, Garrisons = settings.Garrisons,
+                Villages = settings.Villages, Rivers = settings.Rivers,
                 Trails = settings.Trails, WallsAroundTech = settings.WallsAroundTech, Time = settings.Time, Symmetry = settings.Symmetry,
                 Asymmetry = settings.Asymmetry, Fairness = settings.Fairness, Trees = settings.Trees, Tech = settings.Tech, Name = settings.Name,
                 MaxAttempts = settings.MaxAttempts,

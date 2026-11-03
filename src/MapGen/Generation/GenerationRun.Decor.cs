@@ -176,6 +176,7 @@ internal sealed partial class GenerationRun
                     TryPlaceTrail(roadType, start, cluster.Take(1).ToList());
             }
         }
+        PlaceTrailNetwork(roadType);
     }
 
     /// <summary>
