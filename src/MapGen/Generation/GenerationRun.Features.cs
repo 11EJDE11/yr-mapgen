@@ -531,7 +531,8 @@ internal sealed partial class GenerationRun
 
         foreach (var s in structures)
         {
-            if (!within(s.Position))
+            // Only what matters for play: tech and garrisons. Props may sit inside a fence.
+            if (!within(s.Position) || walledOff.Contains(s) || !(Analysis.FairnessAnalyzer.TechKinds.ContainsKey(s.Type) || theater.Garrisons.Contains(s.Type)))
                 continue;
             var (w, h) = theater.Building(s.Type).FoundationSize;
             var ring = new List<CellPos>();

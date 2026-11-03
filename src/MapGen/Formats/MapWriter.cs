@@ -66,6 +66,7 @@ public static class MapWriter
         WriteStructures(map, ini);
         WriteTerrain(map, ini);
         WriteSmudges(map, ini);
+        WriteUnits(map, ini);
 
         foreach (string empty in new[] { "Triggers", "Events", "Actions", "Tags", "TeamTypes", "ScriptTypes", "TaskForces", "AITriggerTypes" })
             ini.Section(empty);
@@ -231,6 +232,19 @@ public static class MapWriter
         var s = ini.Section("Terrain");
         foreach (var t in map.TerrainObjects.OrderBy(t => t.Position.Y).ThenBy(t => t.Position.X))
             s.Set((t.Position.Y * 1000 + t.Position.X).ToString(), t.Type);
+    }
+
+    private static void WriteUnits(MapModel map, IniDocument ini)
+    {
+        if (map.Units.Count == 0)
+            return;
+        var s = ini.Section("Units");
+        for (int i = 0; i < map.Units.Count; i++)
+        {
+            var u = map.Units[i];
+            // owner,type,health,x,y,facing,mission,tag,veterancy,group,highPriority,autocreateNo,autocreateYes,follows
+            s.Set(i.ToString(), $"{u.Owner},{u.Type},{u.Health},{u.Position.X},{u.Position.Y},{u.Facing},Guard,None,0,-1,0,1,0,-1");
+        }
     }
 
     private static void WriteSmudges(MapModel map, IniDocument ini)

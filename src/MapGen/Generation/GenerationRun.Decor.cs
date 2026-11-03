@@ -221,8 +221,9 @@ internal sealed partial class GenerationRun
             return false;
         double ux = dx / len, uy = dy / len;
 
-        // A few cells out from the start position: the construction yard and starting units sit there.
-        var a = new CellPos(start.X + (int)Math.Round(ux * 4), start.Y + (int)Math.Round(uy * 4));
+        // From the start position itself: the construction yard deploys over it and hides the road's
+        // blunt end (there are no end pieces for roads).
+        var a = start;
 
         // Calling points: at the near edge of each target, approached from the previous point.
         var stops = new List<CellPos>();
@@ -240,7 +241,7 @@ internal sealed partial class GenerationRun
             from = edge;
         }
         // A trail of a cell or two (tech right outside the base) looks odd: leave it out.
-        if (stops.Count == 0 || a.DistanceTo(stops[^1]) < 6)
+        if (stops.Count == 0 || a.DistanceTo(stops[^1]) < 10)
             return false;
 
         // A kink in the first leg, in one direction, the other, or none.
@@ -262,12 +263,17 @@ internal sealed partial class GenerationRun
     }
 
     /// <summary>One trail for one player. Trails are cosmetic tiles, so they may run through the base, core included.</summary>
+    /// <summary>Cells a construction yard covers when deployed at a start (4x4 round the waypoint).</summary>
+    private bool UnderYard(CellPos p) => players.Any(pl => p.X - pl.Position.X is >= -1 and <= 2 && p.Y - pl.Position.Y is >= -1 and <= 2);
+
     private bool TryPlaceTrailPath(ConnectedTileType roadType, List<CellPos> path)
     {
-        if (!IsFlatGround(path[0]))
+        // Under a construction yard several trails may meet: road there is hidden, so overlaps are allowed.
+        bool Ground(CellPos p) => IsFlatGround(p) || roadCells.Contains(p) && players.Any(pl => pl.Position.DistanceTo(p) < 2.5);
+        if (!Ground(path[0]))
             return false;
-        int level = GroundLevel(path[0]);
-        bool Valid(CellPos p) => IsUsable(p) && IsFlatGround(p) && GroundLevel(p) == level
+        int level = map[path[0]].Level;
+        bool Valid(CellPos p) => IsUsable(p) && Ground(p) && (roadCells.Contains(p) ? map[p].Level : GroundLevel(p)) == level
                                  && zone[p.X, p.Y] is Zone.Free or Zone.Open or Zone.Base or Zone.BaseCore;
         if (!path.All(Valid))
             return false;
@@ -277,6 +283,12 @@ internal sealed partial class GenerationRun
         if (!result.Success)
             return false;
 
+        // Road already under a yard keeps its tiles; the new trail only adds what lies outside.
+        var keep = FoundationCells(result.Plan.Placements).Where(c => map.IsValid(c) && roadCells.Contains(c) && UnderYard(c))
+            .Select(c => (c, map[c])).ToList();
+        foreach (var (c, cell) in keep)
+            map[c] = cell;
+
         foreach (var p in CliffBuilder.Apply(map, theater, result.Plan, level, new Random(seed)))
         {
             tilePlaced[p.X, p.Y] = true;
@@ -284,6 +296,8 @@ internal sealed partial class GenerationRun
                 zone[p.X, p.Y] = Zone.Open;
             roadCells.Add(p);
         }
+        foreach (var (c, cell) in keep)
+            map[c] = cell;
         return true;
     }
 
@@ -382,14 +396,14 @@ internal sealed partial class GenerationRun
         // Noise patches: (ground, scale, threshold). Lower threshold = more of it.
         var patches = map.Theater switch
         {
-            "URBAN" => new[] { (Ground.Green, 14.0, 0.56), (Ground.Rough, 7.0, 0.72), (Ground.Pave, 9.0, 0.74), (Ground.Sand, 6.0, 0.78) },
+            "URBAN" => new[] { (Ground.Green, 14.0, 0.6), (Ground.Rough, 7.0, 0.74), (Ground.Pave, 7.0, 0.76), (Ground.Sand, 6.0, 0.78) },
             "NEWURBAN" => new[] { (Ground.Rough, 9.0, 0.66), (Ground.Sand, 7.0, 0.74), (Ground.Pave, 8.0, 0.78) },
             "SNOW" => new[] { (Ground.Rough, 9.0, 0.68), (Ground.Sand, 7.0, 0.72), (Ground.Green, 10.0, 0.76) },
             "DESERT" => new[] { (Ground.Sand, 9.0, 0.64), (Ground.Rough, 7.0, 0.74), (Ground.Green, 11.0, 0.72) },
             _ => new[] { (Ground.Rough, 9.0, 0.66), (Ground.Sand, 7.0, 0.70), (Ground.Green, 12.0, 0.80) },
         };
         // Verges: the ground that matches a shore's beach and a road's shoulder.
-        Ground shoreVerge = map.Theater switch { "TEMPERATE" => Ground.Green, "URBAN" => Ground.Green, "SNOW" => Ground.Green, _ => Ground.None };
+        Ground shoreVerge = map.Theater switch { "TEMPERATE" => Ground.Green, "URBAN" => Ground.Green, "NEWURBAN" => Ground.Green, "SNOW" => Ground.Green, _ => Ground.None };
         Ground roadVerge = map.Theater switch { "NEWURBAN" => Ground.Sand, "TEMPERATE" => Ground.Sand, "DESERT" => Ground.Sand, "SNOW" => Ground.Rough, _ => Ground.None };
 
         var sets = new Dictionary<Ground, (int Ground, int Lat)>();
@@ -491,11 +505,15 @@ internal sealed partial class GenerationRun
 
     private void PlaceSmudges()
     {
+        // Craters and scorch marks everywhere at a low rate, and thick round the shared tech and the
+        // garrisons, where the fighting is meant to happen.
+        var hot = sharedTech.Select(s => s.Position).Concat(structures.Where(s => theater.Garrisons.Contains(s.Type)).Select(s => s.Position)).ToList();
         foreach (var p in map.AllValidCells())
         {
             if (!IsUsable(p) || zone[p.X, p.Y] is not (Zone.Free or Zone.Open) || tilePlaced[p.X, p.Y] || !heights.IsFlat(p))
                 continue;
-            if (rng.NextDouble() > 0.004)
+            double rate = hot.Any(h => h.DistanceTo(p) < 9) ? 0.03 : 0.004;
+            if (rng.NextDouble() > rate)
                 continue;
             var list = rng.NextDouble() < 0.7 ? SmallCraters : Burns;
             map.Smudges.Add(new SmudgeObject { Type = list[rng.Next(list.Length)], Position = p });

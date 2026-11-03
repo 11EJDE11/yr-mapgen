@@ -114,7 +114,7 @@ internal static class Program
         {
             settings.Seed = baseSeed + n * 104729;
             bool debug = Environment.GetEnvironmentVariable("MAPGEN_DEBUG") == "1";
-            var result = generator.Generate(settings, debug ? msg => { if (!msg.Contains(": ")) Console.Error.WriteLine("ATTEMPT " + msg); } : null);
+            var result = generator.Generate(settings, debug ? msg => { if (msg.Contains("trying another seed") || msg.Contains("Every attempt")) Console.Error.WriteLine("ATTEMPT " + msg); } : null);
 
             string path = output ?? $"generated_{settings.FormatLabel}_{result.Seed}.map";
             if (count > 1 || Directory.Exists(path))

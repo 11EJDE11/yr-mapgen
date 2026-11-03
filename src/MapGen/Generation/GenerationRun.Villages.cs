@@ -34,7 +34,7 @@ internal sealed partial class GenerationRun
             if (mate != null && !done.Contains((mate, pl)) && rng.NextDouble() < 0.6)
             {
                 done.Add((pl, mate));
-                TryPlaceTrail(roadType, pl.Position, new List<(PlayerSlot, CellPos, double)> { (pl, mate.Position, BaseCoreRadius - 2) });
+                TryPlaceTrail(roadType, pl.Position, new List<(PlayerSlot, CellPos, double)> { (pl, mate.Position, -1) });
             }
         }
     }
@@ -51,81 +51,69 @@ internal sealed partial class GenerationRun
     };
 
     /// <summary>
-    /// A village: a short road with three to five civilian buildings along it and a fence round one of
-    /// them, near the contested ground or out by a player's far fields. Symmetric, like garrisons.
+    /// A village: three to five civilian buildings either side of a trail, out on the open ground
+    /// between the bases, with a fence round one of them. Villages without a trail nearby are a
+    /// cluster of houses (no road stub that leads nowhere). Symmetric, like garrisons.
     /// </summary>
     private void PlaceVillages()
     {
         if (settings.Villages <= 0)
             return;
-        var roadType = RoadType();
         var palette = theater.Garrisons.Select(n => theater.Building(n))
             .Where(b => b != null && b.FoundationSize.W <= 3 && b.FoundationSize.H <= 3).ToList();
         if (palette.Count == 0)
             return;
 
+        bool Site(CellPos at) => IsUsable(at) && players.All(p => p.Position.DistanceTo(at) >= BaseRadius + 8) && at.DistanceTo(MapCentre()) >= 12;
+        var roadSites = roadCells.Where(Site).OrderBy(_ => rng.Next()).ToList();
+
         int perSide = (int)Math.Round(settings.Villages * 2);
         int placed = 0;
         for (int attempt = 0; attempt < perSide * 30 && placed < perSide; attempt++)
         {
-            var at = rng.NextDouble() < 0.6 ? PickContestedPoint(BaseRadius + 10) : new CellPos(rng.Next(1, map.Span), rng.Next(1, map.Span));
-            if (!IsUsable(at) || !IsFlatGround(at) || zone[at.X, at.Y] != Zone.Free || OnRoute(at)
-                || players.Any(p => p.Position.DistanceTo(at) < BaseRadius + 8) || at.DistanceTo(MapCentre()) < 12)
+            bool onRoad = roadSites.Count > 0 && rng.NextDouble() < 0.75;
+            var at = onRoad ? roadSites[rng.Next(roadSites.Count)] : PickContestedPoint(BaseRadius + 10);
+            if (!Site(at) || !onRoad && (zone[at.X, at.Y] != Zone.Free || OnRoute(at)))
                 continue;
-            if (TryPlaceVillage(roadType, at, palette))
+            if (TryPlaceVillage(at, onRoad, palette))
                 placed++;
         }
     }
 
-    private bool TryPlaceVillage(ConnectedTileType roadType, CellPos at, List<Theater.BuildingInfo> palette)
+    private bool TryPlaceVillage(CellPos at, bool onRoad, List<Theater.BuildingInfo> palette)
     {
-        // The road: a straight run through the village along a random direction.
-        double angle = rng.NextDouble() * Math.PI;
-        double ux = Math.Cos(angle), uy = Math.Sin(angle);
-        int half = 5 + rng.Next(0, 3);
-        var a = new CellPos(at.X - (int)Math.Round(ux * half), at.Y - (int)Math.Round(uy * half));
-        var b = new CellPos(at.X + (int)Math.Round(ux * half), at.Y + (int)Math.Round(uy * half));
-        if (a == b)
-            return false;
-
-        int level = GroundLevel(at);
-        var roadCells = new List<CellPos>();
-        if (roadType != null)
+        // Along the road where there is one (its local direction), otherwise any direction.
+        double ux, uy;
+        if (onRoad)
         {
-            // Every copy of the road, or none.
-            var plans = new List<ConnectedTilePlan>();
-            int seed = rng.Next();
-            for (int t = 0; t < sym.Order; t++)
+            var near = roadCells.Where(r => r.DistanceTo(at) < 6).ToList();
+            double sx = 0, sy = 0, sxy = 0, mx = near.Average(r => r.X), my = near.Average(r => r.Y);
+            foreach (var r in near)
             {
-                var path = new List<CellPos> { sym.Apply(t, a), sym.Apply(t, b) };
-                if (Asymmetric)
-                    path = path.Select(p => SharedImage(0, p)).ToList();
-                bool Valid(CellPos p) => IsUsable(p) && IsFlatGround(p) && GroundLevel(p) == level && zone[p.X, p.Y] is Zone.Free or Zone.Open;
-                if (!path.All(Valid))
-                    return false;
-                var result = ConnectedTilePlanner.Plan(roadType, path, ConnectedTileSide.Front, seed, useEndPieces: false, closed: false, Valid);
-                if (!result.Success)
-                    return false;
-                plans.Add(result.Plan);
+                sx += (r.X - mx) * (r.X - mx);
+                sy += (r.Y - my) * (r.Y - my);
+                sxy += (r.X - mx) * (r.Y - my);
             }
-            foreach (var plan in plans)
-                foreach (var p in CliffBuilder.Apply(map, theater, plan, level, new Random(seed)))
-                {
-                    tilePlaced[p.X, p.Y] = true;
-                    if (zone[p.X, p.Y] == Zone.Free)
-                        zone[p.X, p.Y] = Zone.Open;
-                    roadCells.Add(p);
-                    this.roadCells.Add(p);
-                }
+            double theta = 0.5 * Math.Atan2(2 * sxy, sx - sy);
+            ux = Math.Cos(theta);
+            uy = Math.Sin(theta);
         }
+        else
+        {
+            double angle = rng.NextDouble() * Math.PI;
+            ux = Math.Cos(angle);
+            uy = Math.Sin(angle);
+        }
+        int half = 5 + rng.Next(0, 3);
+        var roadNear = onRoad ? roadCells.Where(r => r.DistanceTo(at) < half + 4).ToList() : new List<CellPos>();
 
-        // Buildings either side of the road, spaced along it.
+        // Buildings either side of the line, spaced along it.
         int count = 3 + rng.Next(0, 3);
         int built = 0;
         var houses = new List<List<StructureObject>>();
         for (int i = 0; i < count; i++)
         {
-            double f = (i + 0.5) / count * 2 - 1;      // -1..1 along the road
+            double f = (i + 0.5) / count * 2 - 1;      // -1..1 along the line
             int side = (i % 2 == 0) ? 1 : -1;
             var building = palette[rng.Next(palette.Count)];
             var (w, h) = building.FoundationSize;
@@ -139,6 +127,7 @@ internal sealed partial class GenerationRun
             {
                 built++;
                 houses.Add(structures.Skip(before).ToList());
+                villageHouses.AddRange(structures.Skip(before));
             }
         }
         if (built < 2)
@@ -150,7 +139,7 @@ internal sealed partial class GenerationRun
             int fence = fences.Select(theater.OverlayIndex).FirstOrDefault(i => i >= 0, -1);
             if (fence >= 0 && rng.NextDouble() < 0.7)
                 foreach (var copy in houses[rng.Next(houses.Count)])
-                    PlaceFence(copy, fence, roadCells);
+                    PlaceFence(copy, fence, roadNear.Count > 0 ? roadNear : new List<CellPos> { at });
         }
         return true;
     }
@@ -251,7 +240,11 @@ internal sealed partial class GenerationRun
                     break;
                 }
             }
-            if (crossing == default || bridged.Any(b => b.DistanceTo(crossing) < 10))
+            // Only the river gets bridges; lakes are routed round. (The first water a route meets is
+            // usually the river's beach, which is not in the river's open-water cells.)
+            if (crossing != default && !Disk(crossing, 3).Any(riverCells.Contains))
+                crossing = default;
+            if (crossing == default || bridged.Any(b => b.DistanceTo(crossing) < 12))
             {
                 if (Environment.GetEnvironmentVariable("MAPGEN_DEBUG") == "1")
                     Console.Error.WriteLine($"BRIDGE player {pl.Waypoint}: {(crossing == default ? "route never meets water" : "already bridged nearby")}");
@@ -324,7 +317,8 @@ internal sealed partial class GenerationRun
                 var cells = new List<CellPos> { own[0] - step };
                 cells.AddRange(own);
                 cells.Add(own[^1] + step);
-                ok = LandOk(cells[0]) && LandOk(cells[^1]) && own.All(c => !bridged.Contains(c));
+                // Well clear of every other bridge: two side by side read as one overlapping mess.
+                ok = LandOk(cells[0]) && LandOk(cells[^1]) && cells.All(c => !bridged.Any(b => b.DistanceTo(c) < 9));
                 if (!ok && Environment.GetEnvironmentVariable("MAPGEN_DEBUG") == "1")
                     Console.Error.WriteLine($"    lane {lane} shift {shift}: ends {cells[0]}={zone[cells[0].X, cells[0].Y]}/level {map[cells[0]].Level}/{(IsUsable(cells[0]) ? "usable" : "unusable")}, {cells[^1]}={zone[cells[^1].X, cells[^1].Y]}/level {map[cells[^1]].Level}; span {own.Count}");
                 lanes.Add(cells);

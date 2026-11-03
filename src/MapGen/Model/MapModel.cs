@@ -45,6 +45,16 @@ public sealed class SmudgeObject
     public CellPos Position;
 }
 
+/// <summary>A vehicle on the map (civilian cars parked as decoration).</summary>
+public sealed class UnitObject
+{
+    public string Owner = "Neutral";
+    public string Type;
+    public CellPos Position;
+    public int Health = 256;
+    public int Facing = 64;
+}
+
 /// <summary>
 /// Cell-space model of an RA2/YR map. Cell (x, y) is valid when it lies inside the diamond
 /// x + y > W, |x - y| < W, x + y <= W + 2H for Size=0,0,W,H.
@@ -93,6 +103,7 @@ public sealed class MapModel
     public List<StructureObject> Structures { get; } = new();
     public List<TerrainObject> TerrainObjects { get; } = new();
     public List<SmudgeObject> Smudges { get; } = new();
+    public List<UnitObject> Units { get; } = new();
 
     public bool IsValid(int x, int y)
     {

@@ -65,6 +65,7 @@ internal sealed partial class GenerationRun
     private readonly List<PlayerSlot> players = new();
     private readonly List<StructureObject> structures = new();
     private readonly List<TerrainObject> terrainObjects = new();
+    private readonly List<UnitObject> units = new();
 
     private readonly IReadOnlyList<ConnectedTileType> connectedTypes;
 
@@ -85,7 +86,7 @@ internal sealed partial class GenerationRun
         ["CreateMap"] = "creating the map", ["PlaceStarts"] = "placing starts", ["ReserveBases"] = "reserving bases",
         ["PlanTerrain"] = "shaping terrain", ["SharedTech"] = "placing shared tech", ["Resources"] = "placing resources",
         ["PlayerTech"] = "placing player tech", ["TechWalls"] = "building sandbags", ["Garrisons"] = "placing garrisons",
-        ["Villages"] = "building villages", ["Trails"] = "laying trails", ["Obstacles"] = "growing forests", ["Scatter"] = "scattering trees and rocks",
+        ["Villages"] = "building villages", ["Trails"] = "laying trails", ["Dressing"] = "dressing the map", ["Obstacles"] = "growing forests", ["Scatter"] = "scattering trees and rocks",
         ["Connectivity"] = "checking routes", ["Trees"] = "planting trees", ["Realize"] = "writing tiles",
         ["Analyze"] = "measuring fairness",
     };
@@ -114,8 +115,9 @@ internal sealed partial class GenerationRun
         Step("PlayerTech", () => PlaceTech(shared: false));
         Step("TechWalls", PlaceTechWalls);
         Step("Garrisons", PlaceGarrisons);
-        Step("Villages", PlaceVillages);
         Step("Trails", PlaceTrails);
+        Step("Villages", PlaceVillages);
+        Step("Dressing", PlaceDressing);
         Step("Obstacles", PlaceObstacles);
         Step("Scatter", PlaceScatter);
         Step("Connectivity", EnsureConnectivity);
@@ -171,6 +173,9 @@ internal sealed partial class GenerationRun
             terraceShape = shapeRoll < 0.55 ? TerraceShape.Highland : shapeRoll < 0.8 ? TerraceShape.Mesa : TerraceShape.Rolling;
             if (Enum.TryParse<TerraceShape>(Environment.GetEnvironmentVariable("MAPGEN_TERRACE_SHAPE") ?? "", true, out var forcedShape))
                 terraceShape = forcedShape;
+            // The city cliff sets have no ramp pieces: a raised base or centre could not be reached.
+            if (settings.Theater.ToUpperInvariant() is "URBAN" or "NEWURBAN")
+                terraceShape = TerraceShape.Rolling;
         }
 
         // Playable area per format (Size units: W columns of 60 px, H rows of 30 px; W = H is square in cell space).
@@ -485,6 +490,7 @@ internal sealed partial class GenerationRun
         }
 
         PaintGround();
+        TileGallery();
 
         // Levels and slope tiles for all ground that is not a cliff or trail.
         heights.WriteBack(tilePlaced, clearId);
@@ -504,6 +510,7 @@ internal sealed partial class GenerationRun
 
         map.Structures.AddRange(structures);
         map.TerrainObjects.AddRange(terrainObjects);
+        map.Units.AddRange(units);
 
         map.MinPlayers = 2;
         map.MaxPlayers = players.Count;
@@ -515,6 +522,36 @@ internal sealed partial class GenerationRun
 
         AddTeamMappings();
         ApplyLighting();
+    }
+
+    /// <summary>Debugging aid (MAPGEN_TILE_GALLERY=set index): every tile of one set laid out in a grid at the map centre.</summary>
+    private void TileGallery()
+    {
+        if (!int.TryParse(Environment.GetEnvironmentVariable("MAPGEN_TILE_GALLERY"), out int setIndex))
+            return;
+        var set = theater.TileSet(setIndex);
+        if (set == null)
+            return;
+        var c = MapCentre();
+        int cols = 8;
+        for (int i = 0; i < set.TilesInSet; i++)
+        {
+            var tile = theater.Tile(set.StartTile + i);
+            if (tile == null || tile.Missing)
+                continue;
+            var origin = new CellPos(c.X - 24 + (i % cols) * 6, c.Y - 24 + (i / cols) * 6);
+            foreach (var cell in tile.Cells)
+            {
+                var p = new CellPos(origin.X + cell.X, origin.Y + cell.Y);
+                if (!map.IsValid(p))
+                    continue;
+                ref var m = ref map[p];
+                m.TileIndex = tile.Id;
+                m.SubTile = (byte)cell.Index;
+                m.Level = 0;
+            }
+            Console.Error.WriteLine($"GALLERY {set.Name}#{i} at {origin} ({tile.Width}x{tile.Height})");
+        }
     }
 
     private void AddTeamMappings()
@@ -543,6 +580,13 @@ internal sealed partial class GenerationRun
             TimeOfDay.Night => (0.55, 0.75, 0.80, 1.05, 0.065),
             _ => (1.00, 1.00, 1.00, 1.00, 0.032),
         };
+        // A little variety from map to map: a warmer or cooler cast, a touch brighter or dimmer.
+        var tintRng = new Random(unchecked(seed * 17 + 3));
+        double tint = (tintRng.NextDouble() - 0.5) * 0.12;
+        ambient *= 1 + (tintRng.NextDouble() - 0.5) * 0.08;
+        red *= 1 + tint;
+        blue *= 1 - tint;
+        green *= 1 + (tintRng.NextDouble() - 0.5) * 0.04;
 
         string F(double d) => d.ToString("0.000000", System.Globalization.CultureInfo.InvariantCulture);
         var l = map.Lighting;

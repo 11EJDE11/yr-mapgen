@@ -402,8 +402,9 @@ internal sealed partial class GenerationRun
     {
         for (int iteration = 0; iteration < 20; iteration++)
         {
+            // Every start, and the centre (a lake round it would leave the centre building on an islet).
             var seen = FloodMask(land, players[0].Position);
-            var cut = players.Select(pl => pl.Position).FirstOrDefault(p => !seen[p.X, p.Y]);
+            var cut = players.Select(pl => pl.Position).Append(MapCentre()).FirstOrDefault(p => !seen[p.X, p.Y]);
             if (cut == default)
                 return;
 
