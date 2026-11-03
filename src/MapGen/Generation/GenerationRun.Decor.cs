@@ -235,7 +235,8 @@ internal sealed partial class GenerationRun
             stops.Add(edge);
             from = edge;
         }
-        if (stops.Count == 0)
+        // A trail of a cell or two (tech right outside the base) looks odd: leave it out.
+        if (stops.Count == 0 || a.DistanceTo(stops[^1]) < 6)
             return false;
 
         // A kink in the first leg, in one direction, the other, or none.

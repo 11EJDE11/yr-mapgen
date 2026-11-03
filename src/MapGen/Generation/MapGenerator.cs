@@ -100,9 +100,41 @@ public sealed class MapGenerator
             stop.Cancel();
         }
 
+        if (best == null && !retrying)
+        {
+            // Every seed in this run failed: try once more from a different base seed before giving up.
+            progress?.Invoke("Every attempt failed; trying a new set of seeds");
+            var again = new GeneratorSettings
+            {
+                Seed = unchecked(settings.Seed * 7 + 1000003), Theater = settings.Theater, Format = settings.Format, Style = settings.Style,
+                Size = settings.Size, Shape = settings.Shape, Layout = settings.Layout, Resources = settings.Resources, Gems = settings.Gems,
+                OreFieldSize = settings.OreFieldSize, GemFieldSize = settings.GemFieldSize, Drills = settings.Drills, Economy = settings.Economy,
+                Hills = settings.Hills, Cliffs = settings.Cliffs, CliffStyle = settings.CliffStyle, Water = settings.Water, Garrisons = settings.Garrisons,
+                Trails = settings.Trails, WallsAroundTech = settings.WallsAroundTech, Time = settings.Time, Symmetry = settings.Symmetry,
+                Asymmetry = settings.Asymmetry, Fairness = settings.Fairness, Trees = settings.Trees, Tech = settings.Tech, Name = settings.Name,
+                MaxAttempts = settings.MaxAttempts,
+            };
+            retrying = true;
+            try
+            {
+                return Generate(again, progress);
+            }
+            catch (InvalidOperationException ex)
+            {
+                throw new InvalidOperationException("Every generation attempt failed: "
+                    + string.Join("; ", failures.GroupBy(f => f).Select(g => $"{g.Key} (x{g.Count()})")) + "; " + ex.Message);
+            }
+            finally
+            {
+                retrying = false;
+            }
+        }
+
         return best ?? throw new InvalidOperationException("Every generation attempt failed: "
             + string.Join("; ", failures.GroupBy(f => f).Select(g => $"{g.Key} (x{g.Count()})")));
     }
+
+    private bool retrying;
 
     private (GenerationResult, string) RunAttempt(GeneratorSettings settings, int seed, int index, CancellationToken cancel, Action<string> progress)
     {

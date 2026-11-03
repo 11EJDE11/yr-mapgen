@@ -161,7 +161,7 @@ internal sealed partial class GenerationRun
         if (cliffStyle == CliffStyle.Terraced)
         {
             double shapeRoll = styleRng.NextDouble();
-            terraceShape = shapeRoll < 0.4 ? TerraceShape.Highland : shapeRoll < 0.6 ? TerraceShape.Mesa : TerraceShape.Rolling;
+            terraceShape = shapeRoll < 0.55 ? TerraceShape.Highland : shapeRoll < 0.8 ? TerraceShape.Mesa : TerraceShape.Rolling;
             if (Enum.TryParse<TerraceShape>(Environment.GetEnvironmentVariable("MAPGEN_TERRACE_SHAPE") ?? "", true, out var forcedShape))
                 terraceShape = forcedShape;
         }

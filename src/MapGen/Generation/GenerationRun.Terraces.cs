@@ -31,6 +31,7 @@ internal sealed partial class GenerationRun
     // Block grid: block (i, j) covers cells blockOrigin + i*Block .. +Block-1 in each axis.
     private int blockOrigin, blockCount;
     private bool[,] raised;
+    private bool[,] forcedBase;
 
     /// <summary>Per cell: whether a terrace border runs within a few cells (lakes keep off it).</summary>
     private bool[,] nearTerraceEdge;
@@ -97,9 +98,12 @@ internal sealed partial class GenerationRun
                 double n = 0.7 * ValueNoise(sx / 55.0, sy / 55.0, seed) + 0.3 * ValueNoise(sx / 20.0, sy / 20.0, seed + 1);
 
                 double nearestStart = starts.Min(s => s.DistanceTo(bc));
+                // Highland: a shelf is the base plus about one ring of blocks round it; further out the
+                // noise may not raise anything, so shelves stay separate and the lowland stays open.
+                double shelfReach = BaseRadius + 8 + Block * 0.6;
                 double bias = terraceShape switch
                 {
-                    TerraceShape.Highland => 0.35 * Math.Clamp(1 - nearestStart / (reach * 0.8), -1, 1),
+                    TerraceShape.Highland => nearestStart - Block * 0.7 < shelfReach ? 0.3 : -2,
                     TerraceShape.Mesa => 0.35 * Math.Clamp(1 - bc.DistanceTo(centre) / (reach * 0.7), -1, 1),
                     _ => 0,
                 };
@@ -109,19 +113,18 @@ internal sealed partial class GenerationRun
         // The threshold is taken from the distribution (over the blocks that are free to be either)
         // so the slider means the same on every map.
         // A block is forced when any of its cells is within reach of a base (so the cliff, whose tiles
-        // reach a few cells past the block border, clears the base zone and its margin) or of the centre.
-        const double BaseReach = 8;
-        bool Forced(int i, int j)
+        // reach a few cells past the block border, clears the base zone and its margin) or of the
+        // centre. Measured to the block's nearest cell, so shelves stay as tight as they can.
+        const double BaseReach = 7;
+        double BlockDistance(int i, int j, CellPos p)
         {
-            var bc = BlockCentre(i, j);
-            double half = Block * 0.5 * 1.414;
-            return starts.Min(s => s.DistanceTo(bc)) - half < BaseRadius + BaseReach || bc.DistanceTo(centre) - half < 8;
+            var o = BlockCorner(i, j);
+            double dx = Math.Max(0, Math.Max(o.X - p.X, p.X - (o.X + Block - 1)));
+            double dy = Math.Max(0, Math.Max(o.Y - p.Y, p.Y - (o.Y + Block - 1)));
+            return Math.Sqrt(dx * dx + dy * dy);
         }
-        bool ForcedByBase(int i, int j)
-        {
-            var bc = BlockCentre(i, j);
-            return starts.Min(s => s.DistanceTo(bc)) - Block * 0.5 * 1.414 < BaseRadius + BaseReach;
-        }
+        bool ForcedByBase(int i, int j) => starts.Min(s => BlockDistance(i, j, s)) < BaseRadius + BaseReach;
+        bool Forced(int i, int j) => ForcedByBase(i, j) || BlockDistance(i, j, centre) < 8;
         var values = new List<double>();
         for (int i = 0; i < blockCount; i++)
             for (int j = 0; j < blockCount; j++)
@@ -144,16 +147,18 @@ internal sealed partial class GenerationRun
         bool centreRaised = terraceShape == TerraceShape.Mesa;
         // Highland: a lowland valley between the sides, so each team holds its own shelf and the
         // fight for the middle happens below the cliffs.
-        var teams = players.GroupBy(p => p.Team).Select(g => g.Select(p => p.Position).ToList()).ToList();
         bool InValley(int i, int j)
         {
-            if (!basesRaised || teams.Count < 2)
+            if (!basesRaised || starts.Count < 2)
                 return false;
-            // Between the two nearest teams.
+            // Between the two nearest players: every base gets a shelf of its own, teammates included,
+            // so a shelf is never a third of the map.
             var bc = BlockCentre(i, j);
-            var nearest = teams.Select(t => t.Min(s => s.DistanceTo(bc))).OrderBy(d => d).ToList();
-            return nearest[1] - nearest[0] < Block * 1.1;
+            // Two blocks wide: each shelf's cliff reaches several cells past its border.
+            var nearest = starts.Select(s => s.DistanceTo(bc)).OrderBy(d => d).ToList();
+            return nearest[1] - nearest[0] < Block * 2.1;
         }
+        forcedBase = new bool[blockCount, blockCount];
         void ForceLevels()
         {
             for (int i = 0; i < blockCount; i++)
@@ -162,7 +167,10 @@ internal sealed partial class GenerationRun
                     if (!usableBlock[i, j])
                         continue;
                     if (ForcedByBase(i, j))
+                    {
                         raised[i, j] = basesRaised;
+                        forcedBase[i, j] = basesRaised;
+                    }
                     else if (Forced(i, j))
                         raised[i, j] = centreRaised;
                     else if (InValley(i, j))
@@ -283,8 +291,9 @@ internal sealed partial class GenerationRun
     }
 
     /// <summary>
-    /// Regions must not touch, not even at a corner: their cliffs need room between them. Where two
-    /// touch, both lose the blocks in contact (symmetric, so mirrored regions stay mirrored).
+    /// Regions need two blocks of lowland between them: each cliff reaches several cells past its
+    /// border, and a ramp needs its foot. Blocks nearer than that to another region are dropped on
+    /// both sides (symmetric, so mirrored regions stay mirrored), base blocks excepted.
     /// </summary>
     private void SeparateRegions()
     {
@@ -299,11 +308,11 @@ internal sealed partial class GenerationRun
             {
                 if (owner[i, j] == 0)
                     continue;
-                for (int di = -1; di <= 1; di++)
-                    for (int dj = -1; dj <= 1; dj++)
+                for (int di = -2; di <= 2; di++)
+                    for (int dj = -2; dj <= 2; dj++)
                     {
                         int x = i + di, y = j + dj;
-                        if (x >= 0 && y >= 0 && x < blockCount && y < blockCount && owner[x, y] != 0 && owner[x, y] != owner[i, j])
+                        if (x >= 0 && y >= 0 && x < blockCount && y < blockCount && owner[x, y] != 0 && owner[x, y] != owner[i, j] && !forcedBase[i, j])
                             drop.Add((i, j));
                     }
             }
@@ -392,8 +401,9 @@ internal sealed partial class GenerationRun
                     Console.Error.WriteLine($"TERRACE {region.Count} blocks (base {hasBase}): FAILED {why}");
                 foreach (var (i, j) in region)
                     raised[i, j] = false;
-                if (hasBase)
-                    throw new GenerationFailedException("Could not build the cliffs round a raised base");
+                // The mirror of this region may already stand: flattening one side only would be unfair.
+                if (hasBase || region.Count >= 6)
+                    throw new GenerationFailedException(hasBase ? "Could not build the cliffs round a raised base" : "Could not build a terrace");
             }
             else if (debug)
                 Console.Error.WriteLine($"TERRACE {region.Count} blocks (base {hasBase}): ok, {loops.Count} loop(s)");
@@ -535,9 +545,9 @@ internal sealed partial class GenerationRun
             var (bi, bj) = BlockOf(p);
             if (holes.Contains((bi, bj)))
                 return true;
-            // Cliff pieces at a concave corner reach five cells past the block border.
-            for (int dx = -6; dx <= 6; dx++)
-                for (int dy = -6; dy <= 6; dy++)
+            // Cliff pieces at a concave corner reach up to eight cells past the block border.
+            for (int dx = -9; dx <= 9; dx++)
+                for (int dy = -9; dy <= 9; dy++)
                     if (cells.Contains(new CellPos(p.X + dx, p.Y + dy)))
                         return true;
             return false;
@@ -761,7 +771,7 @@ internal sealed partial class GenerationRun
                 var bad = path.Concat(from.Ramp).Concat(from.Foot).First(c => !valid(c));
                 string near = string.Join(",", Disk(bad, 2).Where(map.IsValid).Select(q => zone[q.X, q.Y]).Where(z => z != Zone.Free).Distinct());
                 why = "stretch blocked at " + bad + ": " + (!map.IsValid(bad) ? "invalid" : zone[bad.X, bad.Y] != Zone.Free ? zone[bad.X, bad.Y].ToString() : "near " + near)
-                    + $" (nearest start {players.Min(pl => pl.Position.DistanceTo(bad)):0.#} away)";
+                    + $" (nearest start {players.Min(pl => pl.Position.DistanceTo(bad)):0.#} away; block {BlockOf(bad)} raised {IsRaisedCell(bad)}, start block {BlockOf(players.OrderBy(pl => pl.Position.DistanceTo(bad)).First().Position)})";
                 return false;
             }
 

@@ -17,16 +17,23 @@ internal sealed partial class GenerationRun
 
     private void PlaceStarts()
     {
-        for (int attempt = 0; attempt < 300; attempt++)
+        for (int round = 0; round < 2; round++)
         {
-            canonicalStarts.Clear();
-            bool ok = sym.Kind switch
+            for (int attempt = 0; attempt < 300; attempt++)
             {
-                SymmetryKind.Diamond => PickDiamondStarts(),
-                _ => PickTemplateStarts(),
-            };
-            if (ok && BuildPlayers())
-                return;
+                canonicalStarts.Clear();
+                bool ok = sym.Kind switch
+                {
+                    SymmetryKind.Diamond => PickDiamondStarts(),
+                    _ => PickTemplateStarts(),
+                };
+                if (ok && BuildPlayers())
+                    return;
+            }
+            // Raised bases need more room than this map has: settle for bases on the lowland.
+            if (cliffStyle != CliffStyle.Terraced || terraceShape != TerraceShape.Highland)
+                break;
+            terraceShape = TerraceShape.Rolling;
         }
         throw new GenerationFailedException("Could not place start locations");
     }
