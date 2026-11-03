@@ -16,7 +16,9 @@ internal sealed partial class GenerationRun
 
     // On island layouts the coastline decides every route, so it follows the feature symmetry even
     // when the rest of the terrain is free; lakes on land maps are free scenery.
-    private Symmetry coastSym => IsIslandLayout ? sym : terrain;
+    // With asymmetry the bases have drifted off their mirror positions, so the coast is free as well:
+    // islands are drawn round each base where it actually is.
+    private Symmetry coastSym => IsIslandLayout && !Asymmetric ? sym : terrain;
 
     private bool IsIslandLayout => settings.Layout is MapLayout.Continent or MapLayout.TeamIslands or MapLayout.PlayerIslands or MapLayout.Archipelago;
 
@@ -105,7 +107,15 @@ internal sealed partial class GenerationRun
                         continue;
                     // Stop at forced land (bases) so a failed shore never floods a player.
                     if (zone[q.X, q.Y] is Zone.Base or Zone.BaseCore)
+                    {
+                        if (Environment.GetEnvironmentVariable("MAPGEN_DEBUG") == "1")
+                        {
+                            var pl = players.OrderBy(o => o.Position.DistanceTo(q)).First();
+                            var comp = components.FirstOrDefault(c => c.Contains(pl.Position));
+                            Console.Error.WriteLine($"OCEAN reached base {pl.Position} at {q}; base island {comp?.Count ?? 0} cells, touches edge {comp?.Any(c => !IsUsable(c) || !map.IsInLocal(c, 3))}, land at q {land[q.X, q.Y]}, shore cells near base {shoreCells.Count(c => c.DistanceTo(pl.Position) < 40)}");
+                        }
                         throw new GenerationFailedException("The ocean reached a base");
+                    }
                     ocean.Add(q);
                     queue.Enqueue(q);
                 }
@@ -236,9 +246,10 @@ internal sealed partial class GenerationRun
             double along = Math.Abs(Along(c));
             // The ford: a strip across the whole river at the centre, so the two halves are separate
             // bodies with their own shores. Straight there, winding further out.
-            if (along < 7)
+            // Wide enough to drive round the centre building and its sandbags even if no bridge fits.
+            if (along < 11)
                 return false;
-            double wobble = (ValueNoise(along / 22.0, 0.37, seed + 11) * 2 - 1) * Wobble * Math.Clamp((along - 7) / 14.0, 0, 1);
+            double wobble = (ValueNoise(along / 22.0, 0.37, seed + 11) * 2 - 1) * Wobble * Math.Clamp((along - 11) / 14.0, 0, 1);
             // The ends taper to a point over the last dozen cells before the playable edge.
             double toEdge = riverReach - along;
             double width = halfWidth * Math.Clamp(toEdge / 12.0, 0.25, 1);
@@ -329,6 +340,12 @@ internal sealed partial class GenerationRun
         }
 
         Smooth(land);
+        // Smoothing can fill the thin band of sea along the edge; an island touching the edge would
+        // count as open land and the ocean would flood it.
+        if (IsIslandLayout)
+            foreach (var p in map.AllValidCells())
+                if (!map.IsInLocal(p, 4))
+                    land[p.X, p.Y] = false;
         // Free lakes stay off the lanes (island coasts are mirrored, so they need not), and off the
         // terraces and their borders, where the cliffs go.
         foreach (var p in map.AllValidCells())

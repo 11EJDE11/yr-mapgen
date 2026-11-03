@@ -35,7 +35,7 @@ internal sealed partial class GenerationRun
                 }
             }
             if (Environment.GetEnvironmentVariable("MAPGEN_DEBUG") == "1")
-                Console.Error.WriteLine($"STARTS round {round} failed (river {riverPlanned}, shape {terraceShape}, templates {Templates().Count()})");
+                Console.Error.WriteLine($"STARTS round {round} failed (river {riverPlanned}, shape {terraceShape}, sym {sym.Kind})");
             // Raised bases need more room than this map has: settle for bases on the lowland. A river
             // the bases cannot keep clear of is dropped.
             if (riverPlanned)
@@ -198,9 +198,16 @@ internal sealed partial class GenerationRun
     }
 
     /// <summary>A raised base needs its whole shelf, cliff included, inside the playable area.</summary>
-    private bool IsGoodStart(CellPos p) => cliffStyle == CliffStyle.Terraced && terraceShape == TerraceShape.Highland
-        ? Disk(p, BaseRadius + 8 + Block).All(q => IsUsable(q) && map.IsInLocal(q, 1))
-        : Disk(p, BaseRadius - 2).All(IsUsable);
+    private bool IsGoodStart(CellPos p)
+    {
+        if (cliffStyle == CliffStyle.Terraced && terraceShape == TerraceShape.Highland)
+            return Disk(p, BaseRadius + 8 + Block).All(q => IsUsable(q) && map.IsInLocal(q, 1));
+        // An island base needs its whole island, shore included, clear of the map edge, or the ocean
+        // (which is everything reachable from the edge) floods in.
+        if (IsIslandLayout)
+            return Disk(p, BaseRadius + 8).All(q => map.IsValid(q) && map.IsInLocal(q, 5));
+        return Disk(p, BaseRadius - 2).All(IsUsable);
+    }
 
     private bool BuildPlayers()
     {

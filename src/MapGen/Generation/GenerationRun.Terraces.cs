@@ -427,7 +427,13 @@ internal sealed partial class GenerationRun
                         cells.Add(new CellPos(blockOrigin + i * Block + dx, blockOrigin + j * Block + dy));
 
             bool hasBase = players.Any(p => cells.Contains(p.Position));
-            if (!TryBuildTerrace(cliffType, region, loops, cells, hasBase, ramps, out string why))
+            // A failed try changes nothing on the map, so another go (new gaps, new planner seeds) is cheap
+            // next to re-rolling the whole map.
+            string why = "";
+            bool built = false;
+            for (int tryNo = 0; tryNo < 4 && !built; tryNo++)
+                built = TryBuildTerrace(cliffType, region, loops, cells, hasBase, ramps, out why);
+            if (!built)
             {
                 if (debug)
                     Console.Error.WriteLine($"TERRACE {region.Count} blocks (base {hasBase}): FAILED {why}");

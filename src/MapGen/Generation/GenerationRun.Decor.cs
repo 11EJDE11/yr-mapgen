@@ -175,8 +175,11 @@ internal sealed partial class GenerationRun
             foreach (var cluster in ClusterByDirection(start, targets).Take(MaxTrailsPerPlayer))
             {
                 // The whole chain first; if the planner cannot route it, settle for the nearest target.
-                if (!TryPlaceTrail(roadType, start, cluster) && cluster.Count > 1)
-                    TryPlaceTrail(roadType, start, cluster.Take(1).ToList());
+                bool ok = TryPlaceTrail(roadType, start, cluster);
+                if (!ok && cluster.Count > 1)
+                    ok = TryPlaceTrail(roadType, start, cluster.Take(1).ToList());
+                if (Environment.GetEnvironmentVariable("MAPGEN_DEBUG") == "1")
+                    Console.Error.WriteLine($"TRAIL player {pl.Waypoint} to {string.Join(" ", cluster.Select(c => $"{c.Centre}({start.DistanceTo(c.Centre):0})"))}: {(ok ? "ok" : "FAILED " + lastTrailFailure)}");
             }
         }
         PlaceTrailNetwork(roadType);
@@ -213,8 +216,11 @@ internal sealed partial class GenerationRun
     /// Lays one trail from just outside the start position past each target in turn, trying a few
     /// bends before giving up. The trail ends at the edge of the last target.
     /// </summary>
+    private string lastTrailFailure;
+
     private bool TryPlaceTrail(ConnectedTileType roadType, CellPos start, List<(PlayerSlot Player, CellPos Centre, double Radius)> targets)
     {
+        lastTrailFailure = "";
         var first = targets[0].Centre;
         double dx = first.X - start.X, dy = first.Y - start.Y, len = Math.Sqrt(dx * dx + dy * dy);
         if (len < 6)
@@ -235,14 +241,28 @@ internal sealed partial class GenerationRun
                 break;
             double back = t.Radius + 1;
             var edge = new CellPos(t.Centre.X - (int)Math.Round(ex / el * back), t.Centre.Y - (int)Math.Round(ey / el * back));
+            // Roads need flat ground at the trail's level: hills run through the bases now, so the
+            // ideal spot may be on a slope. The nearest usable cell beside the target instead.
+            if (!TrailCellOk(edge, map[a].Level))
+            {
+                var alt = Disk(t.Centre, t.Radius + 3.5)
+                    .Where(p => p.DistanceTo(t.Centre) >= t.Radius - 0.5 && TrailCellOk(p, map[a].Level))
+                    .OrderBy(p => p.DistanceTo(edge)).FirstOrDefault();
+                if (alt == default)
+                    break;
+                edge = alt;
+            }
             if (edge == from)
                 break;
             stops.Add(edge);
             from = edge;
         }
         // A trail of a cell or two (tech right outside the base) looks odd: leave it out.
-        if (stops.Count == 0 || a.DistanceTo(stops[^1]) < 10)
+        if (stops.Count == 0 || a.DistanceTo(stops[^1]) < 7)
+        {
+            lastTrailFailure = stops.Count == 0 ? "no stops" : $"too short ({a.DistanceTo(stops[^1]):0.#})";
             return false;
+        }
 
         // A kink in the first leg, in one direction, the other, or none.
         double bend = (rng.NextDouble() * 0.5 + 0.5) * a.DistanceTo(stops[0]) * 0.35;
@@ -252,8 +272,9 @@ internal sealed partial class GenerationRun
             if (b != 0)
             {
                 var mid = new CellPos((a.X + stops[0].X) / 2 + (int)Math.Round(-uy * b), (a.Y + stops[0].Y) / 2 + (int)Math.Round(ux * b));
-                if (mid != a && mid != stops[0])
-                    path.Add(mid);
+                if (mid == a || mid == stops[0] || !TrailCellOk(mid, map[a].Level))
+                    continue;
+                path.Add(mid);
             }
             path.AddRange(stops);
             if (TryPlaceTrailPath(roadType, path))
@@ -263,6 +284,10 @@ internal sealed partial class GenerationRun
     }
 
     /// <summary>One trail for one player. Trails are cosmetic tiles, so they may run through the base, core included.</summary>
+    /// <summary>Whether a trail at <paramref name="level"/> may run through a cell.</summary>
+    private bool TrailCellOk(CellPos p, int level)
+        => IsUsable(p) && IsFlatGround(p) && GroundLevel(p) == level && zone[p.X, p.Y] is Zone.Free or Zone.Open or Zone.Base or Zone.BaseCore;
+
     /// <summary>Cells a construction yard covers when deployed at a start (4x4 round the waypoint).</summary>
     private bool UnderYard(CellPos p) => players.Any(pl => p.X - pl.Position.X is >= -1 and <= 2 && p.Y - pl.Position.Y is >= -1 and <= 2);
 
@@ -271,17 +296,27 @@ internal sealed partial class GenerationRun
         // Under a construction yard several trails may meet: road there is hidden, so overlaps are allowed.
         bool Ground(CellPos p) => IsFlatGround(p) || roadCells.Contains(p) && players.Any(pl => pl.Position.DistanceTo(p) < 2.5);
         if (!Ground(path[0]))
+        {
+            lastTrailFailure = "start not flat";
             return false;
+        }
         int level = map[path[0]].Level;
         bool Valid(CellPos p) => IsUsable(p) && Ground(p) && (roadCells.Contains(p) ? map[p].Level : GroundLevel(p)) == level
                                  && zone[p.X, p.Y] is Zone.Free or Zone.Open or Zone.Base or Zone.BaseCore;
         if (!path.All(Valid))
+        {
+            var bad = path.First(p => !Valid(p));
+            lastTrailFailure = $"vertex {bad}: {(map.IsValid(bad) ? zone[bad.X, bad.Y] + (Ground(bad) ? "" : " not flat") + (GroundLevel(bad) != level ? $" level {GroundLevel(bad)} vs {level}" : "") : "off map")}";
             return false;
+        }
 
         int seed = rng.Next();
         var result = ConnectedTilePlanner.Plan(roadType, path, ConnectedTileSide.Front, seed, useEndPieces: false, closed: false, Valid);
         if (!result.Success)
+        {
+            lastTrailFailure = "planner " + result.Status;
             return false;
+        }
 
         // Road already under a yard keeps its tiles; the new trail only adds what lies outside.
         var keep = FoundationCells(result.Plan.Placements).Where(c => map.IsValid(c) && roadCells.Contains(c) && UnderYard(c))

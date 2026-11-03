@@ -326,6 +326,21 @@ internal sealed partial class GenerationRun
             if (!ok)
                 continue;
 
+            // Open water on both sides of the bridge, the length of its middle: a bridge along the
+            // edge of a lake, with land just beside it, is a bridge to nowhere.
+            int deck = lanes[1].Count - 2;
+            int wet = 0, checkedCells = 0;
+            for (int i = 1 + deck / 4; i <= deck - deck / 4; i++)
+            {
+                var left = lanes[0][Math.Min(i, lanes[0].Count - 2)] - new CellPos(across.X * 3, across.Y * 3);
+                var right = lanes[2][Math.Min(i, lanes[2].Count - 2)] + new CellPos(across.X * 3, across.Y * 3);
+                checkedCells++;
+                if (IsWaterTile(left) && IsWaterTile(right))
+                    wet++;
+            }
+            if (checkedCells == 0 || wet < checkedCells * 0.75)
+                continue;
+
             for (int lane = 0; lane < 3; lane++)
             {
                 var cells = lanes[lane];

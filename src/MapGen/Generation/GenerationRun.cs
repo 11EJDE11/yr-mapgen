@@ -131,7 +131,7 @@ internal sealed partial class GenerationRun
         // Drifted copies cannot be exactly equal; allow a little more spread the further they drift,
         // on top of whatever strictness the user asked for.
         Step("Analyze", () => report = FairnessAnalyzer.Analyze(map, theater, teams, equivalent, expectGroundRoutes: !IsIslandLayout,
-            toleranceScale: settings.FairnessToleranceScale * (1 + 0.5 * Asym)));
+            toleranceScale: settings.FairnessToleranceScale * (1 + Asym)));
         report.Problems.InsertRange(0, warnings.Distinct().Select(w => "generator: " + w));
 
         return new GenerationResult
@@ -165,7 +165,9 @@ internal sealed partial class GenerationRun
         bool riverWanted = settings.Rivers ?? styleRng.NextDouble() < 0.25;
         riverPlanned = riverWanted && settings.Layout == MapLayout.Land && settings.Format != MatchFormat.FourTeamsOfTwo
                        && (settings.Symmetry == null || settings.Symmetry == SymmetryKind.Rotate180 || settings.Rivers == true);
-        if (riverPlanned && cliffStyle == CliffStyle.Terraced)
+        // Terraces are laid out as land; on island layouts (and with a river) the water is the map's
+        // structure instead, so those get the plateau styles.
+        if ((riverPlanned || IsIslandLayout) && cliffStyle == CliffStyle.Terraced)
             cliffStyle = styleRoll < 0.5 ? CliffStyle.Tactical : CliffStyle.Scenic;
         if (cliffStyle == CliffStyle.Terraced)
         {
