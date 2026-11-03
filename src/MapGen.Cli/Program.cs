@@ -71,6 +71,7 @@ internal static class Program
                 case "cliffs": settings.Cliffs = double.Parse(value, System.Globalization.CultureInfo.InvariantCulture); break;
                 case "water": settings.Water = double.Parse(value, System.Globalization.CultureInfo.InvariantCulture); break;
                 case "symmetry": settings.Symmetry = Enum.Parse<SymmetryKind>(value, true); break;
+                case "asymmetry": settings.Asymmetry = double.Parse(value, System.Globalization.CultureInfo.InvariantCulture); break;
                 case "orefields": settings.OreFieldSize = double.Parse(value, System.Globalization.CultureInfo.InvariantCulture); break;
                 case "gemfields": settings.GemFieldSize = double.Parse(value, System.Globalization.CultureInfo.InvariantCulture); break;
                 case "drills": settings.Drills = double.Parse(value, System.Globalization.CultureInfo.InvariantCulture); break;
@@ -144,7 +145,7 @@ internal static class Program
         Console.WriteLine("                   [--size small|medium|large] [--theater temperate|snow|urban|newurban|desert|lunar]");
         Console.WriteLine("                   [--resources low|medium|high|veryhigh] [--gems none|perplayer|contested|both]");
         Console.WriteLine("                   [--economy ore|oilonly|mixed] [--hills|--cliffs|--water 0..1] [--symmetry rotate180|mirrorleftright|mirrortopbottom|quad|diamond|none]");
-        Console.WriteLine("                   [--trees 0..1] [--time day|dusk|night] [--seed N] [--count N] [--out path]");
+        Console.WriteLine("                   [--asymmetry 0..1] [--trees 0..1] [--time day|dusk|night] [--seed N] [--count N] [--out path]");
         Console.WriteLine("                   [--game <YR directory>]   (renders the embedded preview with LightningMap)");
     }
 

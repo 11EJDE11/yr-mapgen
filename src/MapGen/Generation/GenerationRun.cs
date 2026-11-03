@@ -124,7 +124,8 @@ internal sealed partial class GenerationRun
         // Starts meant to be equal: images of one canonical start.
         var equivalent = players.GroupBy(p => p.Canonical).Select(g => g.Select(p => p.Waypoint).ToArray()).ToList();
         FairnessReport report = null;
-        Step("Analyze", () => report = FairnessAnalyzer.Analyze(map, theater, teams, equivalent, expectGroundRoutes: !IsIslandLayout));
+        // Drifted copies cannot be exactly equal; allow a little more spread the further they drift.
+        Step("Analyze", () => report = FairnessAnalyzer.Analyze(map, theater, teams, equivalent, expectGroundRoutes: !IsIslandLayout, toleranceScale: 1 + 0.5 * Asym));
         report.Problems.InsertRange(0, warnings.Distinct().Select(w => "generator: " + w));
 
         return new GenerationResult
@@ -169,7 +170,7 @@ internal sealed partial class GenerationRun
         if (!GeneratorSettings.AllowedSymmetries(settings.Format).Contains(kind))
             throw new GenerationFailedException($"{kind} symmetry does not work for {settings.FormatLabel}");
         // Without symmetry only the terrain is free: bases, resources and tech still need one to be fair.
-        bool freeTerrain = kind == SymmetryKind.None;
+        bool freeTerrain = kind == SymmetryKind.None || Asymmetric;
         if (freeTerrain)
             kind = FeatureSymmetry(shape);
         if (kind == SymmetryKind.Diamond)
@@ -205,6 +206,12 @@ internal sealed partial class GenerationRun
         map = new MapModel(settings.Theater.ToUpperInvariant(), w, h);
         sym = new Symmetry(kind, map);
         terrain = freeTerrain ? new Symmetry(SymmetryKind.None, map) : sym;
+        if (Asymmetric)
+        {
+            driftSeedX = rng.Next();
+            driftSeedY = rng.Next();
+            turnSeed = rng.Next();
+        }
 
         int n = map.Span;
         zone = new Zone[n, n];
@@ -255,25 +262,52 @@ internal sealed partial class GenerationRun
     // ---------------------------------------------------------------- stamping
 
     /// <summary>
-    /// Reserves a feature and all of its symmetric images. <paramref name="owner"/> is the canonical
-    /// start the feature belongs to (images of one player's feature must not land on another player's),
-    /// or -1 for shared features whose images may merge. Terrain (tree clusters) passes its own
-    /// symmetry in <paramref name="images"/>.
+    /// Grows a blob feature round <paramref name="centre"/> and reserves it together with all of its
+    /// symmetric copies. Without asymmetry the canonical blob is grown once and copied exactly; with
+    /// it, every copy is grown afresh round its drifted centre. <paramref name="allowed"/> gives, for
+    /// copy t with centre c, what a cell must satisfy to join that blob. <paramref name="owner"/> is
+    /// the canonical start the feature belongs to (copies of one player's feature must not land on
+    /// another player's), or -1 for shared features whose copies may merge. Terrain (tree clusters)
+    /// passes its own symmetry in <paramref name="images"/>.
     /// </summary>
-    private bool TryStamp(IReadOnlyCollection<CellPos> cells, int owner, Func<Zone, bool> allowed, Zone newZone,
-        out List<CellPos> allCells, Symmetry images = null)
+    private bool TryStamp(CellPos centre, int size, Func<int, CellPos, Func<CellPos, bool>> allowed, int owner,
+        Func<Zone, bool> allowedZone, Zone newZone, out List<List<CellPos>> blobs, Symmetry images = null, double minFill = 0.85)
     {
         images ??= sym;
-        allCells = null;
-        var claimed = new Dictionary<CellPos, CellPos>(); // cell -> start that owns this image
+        blobs = null;
+        bool regrow = Asymmetric && images == sym;
+        var claimed = new Dictionary<CellPos, CellPos>(); // cell -> start that owns this copy
+        var grown = new List<List<CellPos>>();
+        var centres = new List<CellPos>();
+        List<CellPos> canonical = null;
 
         for (int t = 0; t < images.Order; t++)
         {
+            var c = !regrow ? images.Apply(t, centre) : owner >= 0 ? OwnedImage(owner, t, centre) : SharedImage(t, centre);
             CellPos ownerImage = owner >= 0 ? images.Apply(t, canonicalStarts[owner]) : new CellPos(-1, -1);
-            foreach (var c in cells)
+
+            List<CellPos> blob;
+            if (!regrow)
             {
-                var q = images.Apply(t, c);
-                if (!IsUsable(q) || !allowed(ZoneAt(q)))
+                canonical ??= GrowBlob(centre, size, allowed(0, centre));
+                if (canonical.Count < size * minFill)
+                    return false;
+                blob = canonical.Select(p => images.Apply(t, p)).ToList();
+            }
+            else
+            {
+                // Copies that coincide (a feature on a mirror axis) share one blob.
+                int same = centres.IndexOf(c);
+                blob = same >= 0 ? grown[same] : GrowBlob(c, size, allowed(t, c));
+                if (blob.Count < size * minFill)
+                    return false;
+            }
+            centres.Add(c);
+            grown.Add(blob);
+
+            foreach (var q in blob)
+            {
+                if (!IsUsable(q) || !allowedZone(ZoneAt(q)))
                     return false;
                 if (claimed.TryGetValue(q, out var existingOwner) && existingOwner != ownerImage)
                     return false;
@@ -283,13 +317,17 @@ internal sealed partial class GenerationRun
 
         foreach (var q in claimed.Keys)
             zone[q.X, q.Y] = newZone;
-        allCells = claimed.Keys.ToList();
+        blobs = grown.Distinct().ToList();
         return true;
     }
 
-    /// <summary>Places a building and its images. Returns false if any image footprint is blocked.</summary>
+    /// <summary>
+    /// Places a building and its images. Returns false if any image footprint is blocked. With
+    /// asymmetry the copies drift off their mirror positions unless <paramref name="warp"/> is off
+    /// (a centre building must stay one building).
+    /// </summary>
     private bool TryPlaceStructure(string type, CellPos origin, int owner, Func<Zone, bool> allowed, int margin,
-        int maxCopies = int.MaxValue)
+        int maxCopies = int.MaxValue, bool warp = true)
     {
         var info = theater.Building(type);
         if (info == null)
@@ -316,6 +354,14 @@ internal sealed partial class GenerationRun
             // Buildings cannot rotate; centre the real foundation on the image's bounding box.
             int ox = (minX + maxX + 1 - w) / 2;
             int oy = (minY + maxY + 1 - h) / 2;
+            if (warp && Asymmetric)
+            {
+                // A player's own building moves with their start; a shared one drifts a little.
+                var canonicalCentre = new CellPos(origin.X + w / 2, origin.Y + h / 2);
+                var target = owner >= 0 ? OwnedImage(owner, t, canonicalCentre) : SharedImage(t, canonicalCentre);
+                ox = target.X - w / 2;
+                oy = target.Y - h / 2;
+            }
             var imageOrigin = new CellPos(ox, oy);
 
             // Shared buildings (centre, on an axis) map onto themselves: keep one.
@@ -435,7 +481,7 @@ internal sealed partial class GenerationRun
         map.Name = settings.Name ?? $"[{players.Count}] Generated {settings.FormatLabel}{(IsBlitz ? " Blitz" : "")} #{seed}";
         map.ExtraBasic["GeneratorSeed"] = seed.ToString();
         // Invariant so the same seed writes the same file on every machine (no "0,5" on German Windows).
-        map.ExtraBasic["GeneratorSettings"] = FormattableString.Invariant($"{settings.Format};{settings.Style};{settings.Size};{settings.Resources};{settings.Gems};{settings.Economy};hills {settings.Hills:0.##};cliffs {settings.Cliffs:0.##};water {settings.Water:0.##};{sym.Kind}{(terrain.Kind == SymmetryKind.None ? " (terrain free)" : "")}");
+        map.ExtraBasic["GeneratorSettings"] = FormattableString.Invariant($"{settings.Format};{settings.Style};{settings.Size};{settings.Resources};{settings.Gems};{settings.Economy};hills {settings.Hills:0.##};cliffs {settings.Cliffs:0.##};water {settings.Water:0.##};asymmetry {settings.Asymmetry:0.##};{sym.Kind}{(terrain.Kind == SymmetryKind.None ? " (terrain free)" : "")}");
 
         AddTeamMappings();
         ApplyLighting();

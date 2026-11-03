@@ -150,6 +150,14 @@ public sealed class GeneratorSettings
     /// <summary>Optional override; by default it is chosen from the format.</summary>
     public SymmetryKind? Symmetry { get; set; }
 
+    /// <summary>
+    /// 0..1. At 0 every player's side is an exact copy of the others. Above 0 the copies of starts,
+    /// fields, tech and plateaus drift off their mirror positions (up to about 9 cells at 1), fields
+    /// and hills take their own shapes, and lakes, cliffs and trees are not mirrored at all; fairness
+    /// is then enforced by measuring the map and re-rolling.
+    /// </summary>
+    public double Asymmetry { get; set; } = 0;
+
     /// <summary>0..1, amount of tree cover used as obstacles.</summary>
     public double Trees { get; set; } = 0.5;
 

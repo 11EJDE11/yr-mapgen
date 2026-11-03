@@ -71,8 +71,9 @@ public static class FairnessAnalyzer
         ["CAAIRP"] = "airport", ["CAMACH"] = "machineshop", ["CAPOWR"] = "power", ["CASLAB"] = "seclab",
     };
 
+    /// <param name="toleranceScale">Multiplies every tolerance (asymmetric maps are allowed a little more spread).</param>
     public static FairnessReport Analyze(MapModel map, TheaterData theater, IReadOnlyList<int[]> teams = null,
-        IReadOnlyList<int[]> equivalentStarts = null, bool expectGroundRoutes = true)
+        IReadOnlyList<int[]> equivalentStarts = null, bool expectGroundRoutes = true, double toleranceScale = 1)
     {
         var pass = new Passability(map, theater);
         var report = new FairnessReport { MapName = map.Name };
@@ -169,7 +170,7 @@ public static class FairnessAnalyzer
         {
             var members = report.Starts.Where(s => group.Contains(s.Waypoint)).ToList();
             string label = groups.Count > 1 ? $"[{string.Join(",", group)}] " : "";
-            Compare(report, members, label, expectGroundRoutes);
+            Compare(report, members, label, expectGroundRoutes, toleranceScale);
         }
 
         // Whole teams must be equal even when their members are not (front line vs back line).
@@ -182,7 +183,7 @@ public static class FairnessAnalyzer
                 GemsWithin30 = report.Starts.Where(s => t.Contains(s.Waypoint)).Sum(s => s.GemsWithin30),
                 BuildableCells = report.Starts.Where(s => t.Contains(s.Waypoint)).Sum(s => s.BuildableCells),
             }).ToList();
-            CompareTotals(report, teamTotals);
+            CompareTotals(report, teamTotals, toleranceScale);
         }
 
         if (expectGroundRoutes)
@@ -212,24 +213,24 @@ public static class FairnessAnalyzer
             report.Problems.Add($"{label}: spread {spread:P0} (min {min:0}, max {max:0})");
     }
 
-    private static void CompareTotals(FairnessReport report, List<StartReport> teams)
+    private static void CompareTotals(FairnessReport report, List<StartReport> teams, double scale)
     {
         for (int b = 0; b < EconomyBands.Length; b++)
         {
             int band = b;
-            Check(report, teams, $"team economy within {EconomyBands[b]}", s => s.Economy[band], 0.1, 10000);
+            Check(report, teams, $"team economy within {EconomyBands[b]}", s => s.Economy[band], 0.1 * scale, 10000);
         }
-        Check(report, teams, "team gems within 30", s => s.GemsWithin30, 0.1, 10000);
-        Check(report, teams, "team buildable area", s => s.BuildableCells, 0.1);
+        Check(report, teams, "team gems within 30", s => s.GemsWithin30, 0.1 * scale, 10000);
+        Check(report, teams, "team buildable area", s => s.BuildableCells, 0.1 * scale);
     }
 
-    private static void Compare(FairnessReport report, List<StartReport> starts, string prefix, bool expectGroundRoutes)
+    private static void Compare(FairnessReport report, List<StartReport> starts, string prefix, bool expectGroundRoutes, double scale)
     {
         if (starts.Count < 2)
             return;
 
         void Check(string label, Func<StartReport, double> metric, double tolerance, double floor = 1)
-            => FairnessAnalyzer.Check(report, starts, prefix + label, metric, tolerance, floor);
+            => FairnessAnalyzer.Check(report, starts, prefix + label, metric, tolerance * scale, floor);
 
         for (int b = 0; b < EconomyBands.Length; b++)
         {

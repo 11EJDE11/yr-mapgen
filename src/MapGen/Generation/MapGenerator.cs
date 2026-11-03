@@ -45,7 +45,8 @@ public sealed class MapGenerator
         // one after another. Measured: two at a time saves ~30% on seeds that need retries for ~4% on seeds
         // that pass first time; more at once only slows every attempt down.
         const int Window = 2;
-        int attempts = Math.Max(1, settings.MaxAttempts);
+        // Drifted copies fail the fairness check more often, so allow more seeds.
+        int attempts = Math.Max(1, settings.MaxAttempts * (settings.Asymmetry > 0 ? 2 : 1));
         var running = new Task<(GenerationResult Result, string Failure)>[attempts];
         int started = 0;
         // Not disposed: attempts that are still running check its token after Generate returns.

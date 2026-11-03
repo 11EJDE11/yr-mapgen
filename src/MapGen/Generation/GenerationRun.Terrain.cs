@@ -240,7 +240,7 @@ internal sealed partial class GenerationRun
             return false;
         if (MapCentre().DistanceTo(centre) < extent + 2)
             return false;
-        var images = Enumerable.Range(0, sym.Order).Select(t => sym.Apply(t, centre)).ToList();
+        var images = Enumerable.Range(0, sym.Order).Select(t => Image(t, centre)).ToList();
         for (int i = 0; i < images.Count; i++)
             for (int j = i + 1; j < images.Count; j++)
                 if (images[i].DistanceTo(images[j]) < extent * 2 + 3)
@@ -276,13 +276,16 @@ internal sealed partial class GenerationRun
         for (int t = 0; t < sym.Order; t++)
         {
             // Mirrors and rotations map a box to a box and an edge to an edge, so the ramp is
-            // re-planned on whichever edge it lands on in this image.
-            var a = sym.Apply(t, boxA);
-            var b = sym.Apply(t, boxB);
+            // re-planned on whichever edge it lands on in this image. With asymmetry the whole copy
+            // shifts by the drift at its centre.
+            var shift = Drift(sym.Apply(t, centre));
+            CellPos Shifted(CellPos p) => new(p.X + shift.X, p.Y + shift.Y);
+            var a = Shifted(sym.Apply(t, boxA));
+            var b = Shifted(sym.Apply(t, boxB));
             int x0 = Math.Min(a.X, b.X), x1 = Math.Max(a.X, b.X), y0 = Math.Min(a.Y, b.Y), y1 = Math.Max(a.Y, b.Y);
-            var g1 = sym.Apply(t, gapA);
-            var g2 = sym.Apply(t, gapB);
-            var imageCentre = sym.Apply(t, centre);
+            var g1 = Shifted(sym.Apply(t, gapA));
+            var g2 = Shifted(sym.Apply(t, gapB));
+            var imageCentre = Shifted(sym.Apply(t, centre));
 
             RampEdge e;
             if (g1.Y == y1 && g2.Y == y1) e = RampEdge.SouthWest;
@@ -450,8 +453,12 @@ internal sealed partial class GenerationRun
 
             // Hills decide where buildings fit and who has the high ground, so they follow the feature
             // symmetry even when the rest of the terrain is free.
+            // With asymmetry the noise is sampled off the canonical cell by twice the local drift, so
+            // each copy of a rise sits and curves a little differently.
             var c = sym.Canonical(p);
-            double n = 0.75 * ValueNoise(c.X / large, c.Y / large, seed) + 0.25 * ValueNoise(c.X / small, c.Y / small, seed + 1);
+            var (dx, dy) = Drift(p);
+            double sx = c.X + 2 * dx, sy = c.Y + 2 * dy;
+            double n = 0.75 * ValueNoise(sx / large, sy / large, seed) + 0.25 * ValueNoise(sx / small, sy / small, seed + 1);
             double t = Math.Clamp((n - threshold) / (1 - threshold), 0, 1);
             int level = (int)Math.Round(t * maxLevel);
             if (level == 0)

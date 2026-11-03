@@ -163,11 +163,11 @@ internal sealed partial class GenerationRun
             return;
 
         const int MaxTrailsPerPlayer = 3;
-        for (int k = 0; k < canonicalStarts.Count; k++)
+        foreach (var pl in players)
         {
-            var start = canonicalStarts[k];
-            var targets = playerTargets.Where(t => t.Owner == k && t.Centre.DistanceTo(start) > BaseCoreRadius + 3)
-                .OrderBy(t => t.Centre.DistanceTo(start)).ToList();
+            var start = pl.Position;
+            var targets = playerTargets.Where(t => t.Player == pl && t.Centre.DistanceTo(start) > BaseCoreRadius + 3)
+                .DistinctBy(t => t.Centre).OrderBy(t => t.Centre.DistanceTo(start)).ToList();
 
             foreach (var cluster in ClusterByDirection(start, targets).Take(MaxTrailsPerPlayer))
             {
@@ -182,11 +182,11 @@ internal sealed partial class GenerationRun
     /// Groups targets (nearest first) that lie within a narrow angle of each other as seen from the
     /// start and are not far apart, so one trail serves a tech building and the gem field behind it.
     /// </summary>
-    private static List<List<(int Owner, CellPos Centre, double Radius)>> ClusterByDirection(CellPos start, List<(int Owner, CellPos Centre, double Radius)> targets)
+    private static List<List<(PlayerSlot Player, CellPos Centre, double Radius)>> ClusterByDirection(CellPos start, List<(PlayerSlot Player, CellPos Centre, double Radius)> targets)
     {
         const double MaxAngle = 35 * Math.PI / 180;
         const double MaxGap = 16;
-        var clusters = new List<List<(int Owner, CellPos Centre, double Radius)>>();
+        var clusters = new List<List<(PlayerSlot Player, CellPos Centre, double Radius)>>();
         foreach (var t in targets)
         {
             double angle = Math.Atan2(t.Centre.Y - start.Y, t.Centre.X - start.X);
@@ -200,7 +200,7 @@ internal sealed partial class GenerationRun
             if (home != null)
                 home.Add(t);
             else
-                clusters.Add(new List<(int Owner, CellPos Centre, double Radius)> { t });
+                clusters.Add(new List<(PlayerSlot Player, CellPos Centre, double Radius)> { t });
         }
         return clusters;
     }
@@ -209,7 +209,7 @@ internal sealed partial class GenerationRun
     /// Lays one trail from just outside the start position past each target in turn, trying a few
     /// bends before giving up. The trail ends at the edge of the last target.
     /// </summary>
-    private bool TryPlaceTrail(ConnectedTileType roadType, CellPos start, List<(int Owner, CellPos Centre, double Radius)> targets)
+    private bool TryPlaceTrail(ConnectedTileType roadType, CellPos start, List<(PlayerSlot Player, CellPos Centre, double Radius)> targets)
     {
         var first = targets[0].Centre;
         double dx = first.X - start.X, dy = first.Y - start.Y, len = Math.Sqrt(dx * dx + dy * dy);
@@ -256,42 +256,27 @@ internal sealed partial class GenerationRun
         return false;
     }
 
+    /// <summary>One trail for one player. Trails are cosmetic tiles, so they may run through the base, core included.</summary>
     private bool TryPlaceTrailPath(ConnectedTileType roadType, List<CellPos> path)
     {
+        if (!IsFlatGround(path[0]))
+            return false;
+        int level = GroundLevel(path[0]);
+        bool Valid(CellPos p) => IsUsable(p) && IsFlatGround(p) && GroundLevel(p) == level
+                                 && zone[p.X, p.Y] is Zone.Free or Zone.Open or Zone.Base or Zone.BaseCore;
+        if (!path.All(Valid))
+            return false;
+
         int seed = rng.Next();
-        var plans = new List<(ConnectedTilePlan Plan, int Level)>();
-        var claimed = new HashSet<CellPos>();
-        var seen = new HashSet<string>();
-        for (int t = 0; t < sym.Order; t++)
-        {
-            var imagePath = path.Select(p => sym.Apply(t, p)).ToList();
-            // A start on a mirror axis with its tech straight behind it: the image is the same trail.
-            if (!seen.Add(string.Join(";", imagePath)))
-                continue;
-            if (!IsFlatGround(imagePath[0]))
-                return false;
-            int level = GroundLevel(imagePath[0]);
-            // Trails are cosmetic tiles, so they may run through the base, core included.
-            bool Valid(CellPos p) => IsUsable(p) && IsFlatGround(p) && GroundLevel(p) == level && !claimed.Contains(p)
-                                     && zone[p.X, p.Y] is Zone.Free or Zone.Open or Zone.Base or Zone.BaseCore;
-            if (!imagePath.All(Valid))
-                return false;
+        var result = ConnectedTilePlanner.Plan(roadType, path, ConnectedTileSide.Front, seed, useEndPieces: false, closed: false, Valid);
+        if (!result.Success)
+            return false;
 
-            var result = ConnectedTilePlanner.Plan(roadType, imagePath, ConnectedTileSide.Front, seed, useEndPieces: false, closed: false, Valid);
-            if (!result.Success)
-                return false;
-            claimed.UnionWith(FoundationCells(result.Plan.Placements));
-            plans.Add((result.Plan, level));
-        }
-
-        foreach (var (plan, level) in plans)
+        foreach (var p in CliffBuilder.Apply(map, theater, result.Plan, level, new Random(seed)))
         {
-            foreach (var p in CliffBuilder.Apply(map, theater, plan, level, new Random(seed)))
-            {
-                tilePlaced[p.X, p.Y] = true;
-                if (zone[p.X, p.Y] == Zone.Free)
-                    zone[p.X, p.Y] = Zone.Open;
-            }
+            tilePlaced[p.X, p.Y] = true;
+            if (zone[p.X, p.Y] == Zone.Free)
+                zone[p.X, p.Y] = Zone.Open;
         }
         return true;
     }

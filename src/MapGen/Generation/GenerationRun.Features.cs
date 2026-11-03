@@ -10,10 +10,10 @@ internal sealed partial class GenerationRun
     private List<int> gemOverlays;
 
     /// <summary>
-    /// Features placed for one player (their own tech and gem field), in canonical coordinates: the
+    /// Features placed for one player (their own tech and gem field), one entry per copy: the
     /// destinations of that player's dirt trails. Shared and team features are not listed.
     /// </summary>
-    private readonly List<(int Owner, CellPos Centre, double Radius)> playerTargets = new();
+    private readonly List<(PlayerSlot Player, CellPos Centre, double Radius)> playerTargets = new();
 
     // ---------------------------------------------------------------- resources
 
@@ -109,21 +109,24 @@ internal sealed partial class GenerationRun
 
             if (!IsUsable(centre) || !IsFlatGround(centre))
                 continue;
-            int level = GroundLevel(centre);
-            var blob = GrowBlob(centre, size, p => ZoneAt(p) is Zone.Free or Zone.Base && start.DistanceTo(p) >= BaseCoreRadius + 1
-                                                   && IsFlatGround(p) && GroundLevel(p) == level);
-            if (blob.Count < size * 0.85)
-                continue;
-            if (!TryStamp(blob, k, z => z is Zone.Free or Zone.Base, Zone.Resource, out _))
+            // Each copy grows round its own player's (possibly drifted) start, on its own flat level.
+            Func<CellPos, bool> Allowed(int t, CellPos c)
+            {
+                var own = PlayerPosition(k, t);
+                int level = GroundLevel(c);
+                return p => ZoneAt(p) is Zone.Free or Zone.Base && own.DistanceTo(p) >= BaseCoreRadius + 1
+                            && IsFlatGround(p) && GroundLevel(p) == level;
+            }
+            if (!TryStamp(centre, size, Allowed, k, z => z is Zone.Free or Zone.Base, Zone.Resource, out var blobs))
                 continue;
 
-            FillField(blob, gems);
+            FillField(blobs, gems);
             if (gems)
-            {
-                double cx = blob.Average(p => p.X), cy = blob.Average(p => p.Y);
-                var fieldCentre = new CellPos((int)Math.Round(cx), (int)Math.Round(cy));
-                playerTargets.Add((k, fieldCentre, blob.Max(p => p.DistanceTo(fieldCentre)) + 0.5));
-            }
+                foreach (var blob in blobs)
+                {
+                    var fieldCentre = BlobCentre(blob);
+                    playerTargets.Add((OwnerSlot(k, fieldCentre), fieldCentre, blob.Max(p => p.DistanceTo(fieldCentre)) + 0.5));
+                }
             return true;
         }
         return false;
@@ -141,15 +144,16 @@ internal sealed partial class GenerationRun
             int target = centre ? Math.Max(8, size / Math.Max(1, sym.Order / 2)) : size;
             if (!IsUsable(at) || !IsFlatGround(at))
                 continue;
-            int level = GroundLevel(at);
-            var blob = GrowBlob(at, target, p => ZoneAt(p) == Zone.Free && players.All(pl => pl.Position.DistanceTo(p) > BaseRadius + 3)
-                                                 && IsFlatGround(p) && GroundLevel(p) == level);
-            if (blob.Count < target * 0.8)
-                continue;
-            if (!TryStamp(blob, -1, z => z == Zone.Free, Zone.Resource, out _))
+            Func<CellPos, bool> Allowed(int t, CellPos c)
+            {
+                int level = GroundLevel(c);
+                return p => ZoneAt(p) == Zone.Free && players.All(pl => pl.Position.DistanceTo(p) > BaseRadius + 3)
+                            && IsFlatGround(p) && GroundLevel(p) == level;
+            }
+            if (!TryStamp(at, target, Allowed, -1, z => z == Zone.Free, Zone.Resource, out var blobs, minFill: 0.8))
                 continue;
 
-            FillField(blob, gems);
+            FillField(blobs, gems);
             return true;
         }
         return false;
@@ -224,77 +228,87 @@ internal sealed partial class GenerationRun
         return result;
     }
 
-    /// <summary>Assigns ore/gem overlays to a canonical blob and copies them to all images.</summary>
-    private void FillField(List<CellPos> blob, bool gems)
+    private static CellPos BlobCentre(List<CellPos> blob)
+        => new((int)Math.Round(blob.Average(p => p.X)), (int)Math.Round(blob.Average(p => p.Y)));
+
+    /// <summary>
+    /// Assigns ore/gem overlays to a field. Exact copies are filled once and mapped through the
+    /// symmetry; drifted copies (asymmetry) are filled one by one.
+    /// </summary>
+    private void FillField(List<List<CellPos>> blobs, bool gems)
     {
-        double cx = blob.Average(p => p.X), cy = blob.Average(p => p.Y);
-        double r = blob.Max(p => Math.Sqrt((p.X - cx) * (p.X - cx) + (p.Y - cy) * (p.Y - cy))) + 0.75;
         var variants = gems ? gemOverlays : oreOverlays;
+        IEnumerable<CellPos> Copies(CellPos p) => Asymmetric ? new[] { p } : sym.Orbit(p);
+        var fill = Asymmetric ? blobs : new List<List<CellPos>> { blobs[0] };
 
-        foreach (var p in blob)
+        foreach (var blob in fill)
         {
-            double d = Math.Sqrt((p.X - cx) * (p.X - cx) + (p.Y - cy) * (p.Y - cy)) / r;
-            // Official maps keep most ore at stages 7-11 with a thinner rim.
-            double stage = 11.5 - 7 * d * d + (rng.NextDouble() * 2 - 1);
-            byte data = (byte)Math.Clamp((int)Math.Round(stage), 3, 11);
-            short ovl = (short)variants[rng.Next(variants.Count)];
-
-            for (int t = 0; t < sym.Order; t++)
+            double cx = blob.Average(p => p.X), cy = blob.Average(p => p.Y);
+            double r = blob.Max(p => Math.Sqrt((p.X - cx) * (p.X - cx) + (p.Y - cy) * (p.Y - cy))) + 0.75;
+            foreach (var p in blob)
             {
-                var q = sym.Apply(t, p);
-                overlay[q.X, q.Y] = ovl;
-                overlayData[q.X, q.Y] = data;
+                double d = Math.Sqrt((p.X - cx) * (p.X - cx) + (p.Y - cy) * (p.Y - cy)) / r;
+                // Official maps keep most ore at stages 7-11 with a thinner rim.
+                double stage = 11.5 - 7 * d * d + (rng.NextDouble() * 2 - 1);
+                byte data = (byte)Math.Clamp((int)Math.Round(stage), 3, 11);
+                short ovl = (short)variants[rng.Next(variants.Count)];
+                foreach (var q in Copies(p))
+                {
+                    overlay[q.X, q.Y] = ovl;
+                    overlayData[q.X, q.Y] = data;
+                }
             }
         }
 
         if (!gems)
-            PlaceDrills(blob, cx, cy);
+            PlaceDrills(fill, Copies);
 
         // Keep the edges of fields free of obstacles so harvesters can reach every cell.
-        foreach (var p in blob)
-            foreach (var q in Disk(p, 1.5))
-                for (int t = 0; t < sym.Order; t++)
-                {
-                    var img = sym.Apply(t, q);
-                    if (map.IsValid(img) && zone[img.X, img.Y] == Zone.Free)
-                        zone[img.X, img.Y] = Zone.Open;
-                }
+        foreach (var blob in fill)
+            foreach (var p in blob)
+                foreach (var q in Disk(p, 1.5))
+                    foreach (var img in Copies(q))
+                        if (map.IsValid(img) && zone[img.X, img.Y] == Zone.Free)
+                            zone[img.X, img.Y] = Zone.Open;
     }
 
     /// <summary>
     /// Ore drills (TIBTRE) make a field regrow. Most popular maps give 80-90% of ore fields one; the
-    /// choice is made per canonical field, so every player's matching field gets the same.
+    /// choice is made per field, so every player's matching field gets the same.
     /// </summary>
-    private void PlaceDrills(List<CellPos> blob, double cx, double cy)
+    private void PlaceDrills(List<List<CellPos>> blobs, Func<CellPos, IEnumerable<CellPos>> copies)
     {
         var drillTypes = theater.TerrainTypes.Where(t => t.Available && t.SpawnsTiberium).Select(t => t.Name).ToList();
         if (drillTypes.Count == 0 || rng.NextDouble() >= settings.Drills)
             return;
 
-        int count = blob.Count >= 70 ? 2 : 1;
-        var byCentre = blob.OrderBy(p => (p.X - cx) * (p.X - cx) + (p.Y - cy) * (p.Y - cy)).ToList();
-        var chosen = new List<CellPos> { byCentre[0] };
-        if (count == 2)
-        {
-            // Second drill roughly halfway between the centre and the far edge.
-            var far = byCentre[^1];
-            var mid = new CellPos((byCentre[0].X + far.X) / 2, (byCentre[0].Y + far.Y) / 2);
-            if (blob.Contains(mid) && mid.DistanceTo(byCentre[0]) >= 3)
-                chosen.Add(mid);
-        }
+        int count = blobs[0].Count >= 70 ? 2 : 1;
+        var types = Enumerable.Range(0, count).Select(_ => drillTypes[rng.Next(drillTypes.Count)]).ToList();
 
-        foreach (var p in chosen)
+        foreach (var blob in blobs)
         {
-            string type = drillTypes[rng.Next(drillTypes.Count)];
-            var placed = new HashSet<CellPos>();
-            for (int t = 0; t < sym.Order; t++)
+            double cx = blob.Average(p => p.X), cy = blob.Average(p => p.Y);
+            var byCentre = blob.OrderBy(p => (p.X - cx) * (p.X - cx) + (p.Y - cy) * (p.Y - cy)).ToList();
+            var chosen = new List<CellPos> { byCentre[0] };
+            if (count == 2)
             {
-                var q = sym.Apply(t, p);
-                if (!placed.Add(q))
-                    continue;
-                overlay[q.X, q.Y] = -1;
-                overlayData[q.X, q.Y] = 0;
-                terrainObjects.Add(new TerrainObject { Type = type, Position = q });
+                // Second drill roughly halfway between the centre and the far edge.
+                var far = byCentre[^1];
+                var mid = new CellPos((byCentre[0].X + far.X) / 2, (byCentre[0].Y + far.Y) / 2);
+                if (blob.Contains(mid) && mid.DistanceTo(byCentre[0]) >= 3)
+                    chosen.Add(mid);
+            }
+
+            for (int i = 0; i < chosen.Count; i++)
+            {
+                foreach (var q in copies(chosen[i]))
+                {
+                    if (terrainObjects.Any(o => o.Position == q))
+                        continue;
+                    overlay[q.X, q.Y] = -1;
+                    overlayData[q.X, q.Y] = 0;
+                    terrainObjects.Add(new TerrainObject { Type = types[i], Position = q });
+                }
             }
         }
     }
@@ -366,10 +380,11 @@ internal sealed partial class GenerationRun
             int before = structures.Count;
             if (TryPlaceStructure(type, origin, k, z => z is Zone.Free or Zone.Base or Zone.Open, margin: 1))
             {
-                // The first copy is the canonical one (transform 0).
-                var own = structures[before];
-                var centre = new CellPos(own.Position.X + w / 2, own.Position.Y + h / 2);
-                playerTargets.Add((k, centre, Math.Max(w, h) / 2.0 + 0.5));
+                foreach (var own in structures.Skip(before))
+                {
+                    var centre = new CellPos(own.Position.X + w / 2, own.Position.Y + h / 2);
+                    playerTargets.Add((OwnerSlot(k, centre), centre, Math.Max(w, h) / 2.0 + 0.5));
+                }
                 return true;
             }
         }
@@ -419,7 +434,7 @@ internal sealed partial class GenerationRun
             var origin = new CellPos(at.X - w / 2 + rng.Next(-jitter, jitter + 1), at.Y - h / 2 + rng.Next(-jitter, jitter + 1));
             // A centre building must map onto itself under every symmetry: exactly one copy.
             int before = structures.Count;
-            if (TryPlaceStructure(type, origin, -1, z => z is Zone.Free or Zone.Open, margin: 2, maxCopies: centre ? 1 : int.MaxValue))
+            if (TryPlaceStructure(type, origin, -1, z => z is Zone.Free or Zone.Open, margin: 2, maxCopies: centre ? 1 : int.MaxValue, warp: !centre))
             {
                 sharedTech.AddRange(structures.Skip(before));
                 return true;
@@ -450,12 +465,10 @@ internal sealed partial class GenerationRun
                     continue;
 
                 double r = 1.5 + rng.NextDouble() * 3.0;
-                int size = (int)(Math.PI * r * r * (0.6 + rng.NextDouble() * 0.4));
-                var blob = GrowBlob(p, Math.Max(2, size), q => ZoneAt(q) == Zone.Free && !OnLane(q)
-                    && players.All(pl => pl.Position.DistanceTo(q) >= BaseRadius + 2));
-                if (blob.Count < 2)
-                    continue;
-                if (TryStamp(blob, -1, z => z == Zone.Free, Zone.Obstacle, out _, terrain))
+                int size = Math.Max(2, (int)(Math.PI * r * r * (0.6 + rng.NextDouble() * 0.4)));
+                Func<CellPos, bool> Allowed(int t, CellPos c) => q => ZoneAt(q) == Zone.Free && !OnLane(q)
+                    && players.All(pl => pl.Position.DistanceTo(q) >= BaseRadius + 2);
+                if (TryStamp(p, size, Allowed, -1, z => z == Zone.Free, Zone.Obstacle, out _, terrain, minFill: 2.0 / size))
                     break;
             }
         }

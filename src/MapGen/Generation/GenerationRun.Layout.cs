@@ -152,9 +152,12 @@ internal sealed partial class GenerationRun
             var seen = new HashSet<CellPos>();
             for (int t = 0; t < sym.Order; t++)
             {
-                var image = sym.Apply(t, canonicalStarts[k]);
+                var image = Image(t, canonicalStarts[k]);
                 if (!seen.Add(image))
                     continue;
+                // The canonical start was checked already; a drifted copy needs its own check.
+                if (Asymmetric && !IsGoodStart(image))
+                    return false;
                 players.Add(new PlayerSlot { Position = image, Canonical = k, Transform = t });
             }
         }

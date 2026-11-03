@@ -35,6 +35,7 @@ yr-mapgen analyze "Maps/Yuri's Revenge/tourofegypt.map"
 | `--shape` | `random`, `wide`, `square`, `tall` |
 | `--layout` | `land`, `continent`, `teamislands`, `playerislands`, `archipelago`, `mountainous` |
 | `--symmetry` | 1v1: `rotate180`, `mirrorleftright`, `mirrortopbottom`. Team formats: those plus `quad`. 2v2v2v2: `quad`, `diamond`. Any: `none` |
+| `--asymmetry` | 0..1. 0: exact copies. Higher: each side's starts, fields, tech and high ground drift off their mirror spots and take their own shapes; scenery is not mirrored. Fairness is enforced by measuring |
 | `--theater` | `temperate`, `snow`, `urban`, `newurban`, `desert`, `lunar` |
 | `--hills`, `--cliffs`, `--water`, `--trees` | 0..1 |
 | `--resources` | `low`, `medium`, `high`, `veryhigh` |
@@ -64,7 +65,10 @@ Each tech rule has:
 1. **Symmetry.** Features are decided once and copied through a symmetry group: mirror, 180° rotation,
    or 90° rotation for diamond. These are exact isometries of the cell grid. With `none`, lakes,
    closed cliffs, trees and decoration are free; bases, resources, tech, hills and ramped plateaus stay
-   symmetric.
+   symmetric. With `asymmetry` above 0 a smooth drift field pushes every copy of a start, field, tech
+   building and plateau off its mirror position (up to about 9 cells at 1), fields are regrown with
+   their own shapes, hills are sampled off their mirror cells, and the scenery is free as with `none`.
+   The fairness check (with a tolerance widened by up to half) and re-rolling then keep the sides equal.
 2. **Starts.** Per-format templates, each with a protected base area.
 3. **Terrain.** Water mask and shores, cliff plateaus with ramps, ridges, rolling high ground. Heights
    are a corner-height field relaxed to one level per cell, so bases and buildings sit on flat ground.
