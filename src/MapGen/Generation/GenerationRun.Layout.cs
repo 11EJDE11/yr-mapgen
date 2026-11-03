@@ -91,11 +91,13 @@ internal sealed partial class GenerationRun
         {
             double a = t.MinX + rng.NextDouble() * (t.MaxX - t.MinX);
             double b = t.MinY + rng.NextDouble() * (t.MaxY - t.MinY);
-            // Islands need sea all round them, so pull the starts away from the map edge.
-            if (IsIslandLayout)
+            // Islands need sea all round them, so pull the starts away from the map edge. A raised
+            // base needs room behind it for its cliff.
+            double pull = IsIslandLayout ? 0.72 : cliffStyle == CliffStyle.Terraced && terraceShape == TerraceShape.Highland ? 0.66 : 1;
+            if (pull < 1)
             {
-                a = 0.5 + (a - 0.5) * 0.72;
-                b = t.OnAxis ? b : 0.5 + (b - 0.5) * 0.72;
+                a = 0.5 + (a - 0.5) * pull;
+                b = t.OnAxis ? b : 0.5 + (b - 0.5) * pull;
             }
             var p = splitTopBottom ? map.FromNormalisedLocal(b, a) : map.FromNormalisedLocal(a, b);
             if (t.OnAxis)
@@ -142,7 +144,10 @@ internal sealed partial class GenerationRun
         return true;
     }
 
-    private bool IsGoodStart(CellPos p) => Disk(p, BaseRadius - 2).All(IsUsable);
+    /// <summary>A raised base needs its whole shelf, cliff included, inside the playable area.</summary>
+    private bool IsGoodStart(CellPos p) => cliffStyle == CliffStyle.Terraced && terraceShape == TerraceShape.Highland
+        ? Disk(p, BaseRadius + 8 + Block).All(q => IsUsable(q) && map.IsInLocal(q, 1))
+        : Disk(p, BaseRadius - 2).All(IsUsable);
 
     private bool BuildPlayers()
     {

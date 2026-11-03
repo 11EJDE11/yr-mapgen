@@ -39,7 +39,7 @@ yr-mapgen analyze "Maps/Yuri's Revenge/tourofegypt.map"
 | `--fairness` | 0..1. How strictly equivalent starts must match: 1 = within about 15%, 0 = four times looser (asymmetric maps settle sooner) |
 | `--theater` | `temperate`, `snow`, `urban`, `newurban`, `desert`, `lunar` |
 | `--hills`, `--cliffs`, `--water`, `--trees` | 0..1 |
-| `--cliffstyle` | `mixed` (per map), `scenic` (plateaus off the routes), `tactical` (ridge walls with a gateway across each approach, ramped plateaus beside the route facing the owner) |
+| `--cliffstyle` | `mixed` (per map), `terraced` (a few large height regions with long cliff lines along their borders and ramps where the routes cross; highland maps raise the bases, mesa maps the centre), `scenic` (plateaus off the routes), `tactical` (ridge walls with a gateway across each approach, ramped plateaus beside the route facing the owner) |
 | `--resources` | `low`, `medium`, `high`, `veryhigh` |
 | `--orefields`, `--gemfields` | size multiplier (1 = default) |
 | `--drills` | share of ore fields with an ore drill (default 0.85) |
@@ -72,8 +72,11 @@ Each tech rule has:
    their own shapes, hills are sampled off their mirror cells, and the scenery is free as with `none`.
    The fairness check (with a tolerance widened by up to half) and re-rolling then keep the sides equal.
 2. **Starts.** Per-format templates, each with a protected base area.
-3. **Terrain.** Water mask and shores, cliff plateaus with ramps, ridges, rolling high ground. Heights
-   are a corner-height field relaxed to one level per cell, so bases and buildings sit on flat ground.
+3. **Terrain.** With the `terraced` cliff style the map is first divided into a grid of 14-cell blocks,
+   each lowland or raised terrace (highland maps raise the bases with a valley between the sides, mesa
+   maps raise the centre); the borders become long cliff lines with ramp gaps where the routes cross.
+   Then water mask and shores, cliff plateaus with ramps, ridges, rolling high ground. Heights are a
+   corner-height field relaxed to one level per cell, so bases and buildings sit on flat ground.
 4. **Resources.** Per player: main, secondary and optional gem field. Shared contested and centre
    fields. Sizes calibrated against popular maps.
 5. **Tech.** Placed per player, per team, contested or centre (exactly one).

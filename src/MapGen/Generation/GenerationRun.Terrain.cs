@@ -39,8 +39,15 @@ internal sealed partial class GenerationRun
         double cliffs = mountainous ? Math.Max(settings.Cliffs, 0.9) : settings.Cliffs;
         double hills = mountainous ? Math.Max(settings.Hills, 0.85) : settings.Hills;
 
+        // Terraces come first: the level map decides where lakes may go and where cliffs run.
+        var cliffType = connectedTypes?.FirstOrDefault(t =>
+            CliffTypesByTheater.TryGetValue(map.Theater, out var names) && names.Contains(t.IniName));
+        if (cliffStyle == CliffStyle.Terraced && cliffs > 0 && cliffType != null)
+            PlanTerraces(cliffs);
         if (!mountainous)
             PlanWater();
+        if (raised != null)
+            BuildTerraceCliffs(cliffType);
         if (cliffs > 0)
             PlaceCliffPlateaus(cliffs);
         if (hills > 0)
@@ -74,6 +81,9 @@ internal sealed partial class GenerationRun
             PlaceTacticalCliffs(cliffType, amount);
             scenic *= 0.25;
         }
+        // On terraced maps the cliffs are the borders; a few plateaus on the lowland is plenty.
+        if (cliffStyle == CliffStyle.Terraced)
+            scenic *= 0.15;
 
         int target = (int)Math.Round(scenic * CanonicalUsableCells / (IsBlitz ? 700.0 : 520.0));
         target = Math.Max(1, target);
@@ -195,7 +205,7 @@ internal sealed partial class GenerationRun
             // Scenery stays off every lane (free terrain); tactical cliffs only keep the routes to the
             // centre and to teammates open, since cutting the direct line to the enemy is their purpose.
             bool Valid(CellPos p) => IsUsable(p) && map.IsInLocal(p, 2) && zone[p.X, p.Y] == Zone.Free && !claimed.Contains(p)
-                                     && (keepRoutes ? !OnRoute(p) : !OnLane(p)) && !NearProtected(p, 3);
+                                     && (keepRoutes ? !OnRoute(p) : !OnLane(p)) && !NearProtected(p, 3) && !OnTerrace(p);
 
             if (!vertices.All(Valid))
             {
@@ -538,7 +548,7 @@ internal sealed partial class GenerationRun
             var (ramp, foot) = RampCells(e, start, end, x0, x1, y0, y1);
 
             bool Valid(CellPos p) => IsUsable(p) && map.IsInLocal(p, 2) && zone[p.X, p.Y] == Zone.Free && !claimed.Contains(p)
-                                     && !(keepRoutes && OnRoute(p)) && !NearProtected(p, 3);
+                                     && !(keepRoutes && OnRoute(p)) && !NearProtected(p, 3) && !OnTerrace(p);
             if (!path.All(Valid) || !ramp.All(Valid) || !foot.All(Valid))
             {
                 lastCliffFailure = "box invalid";
@@ -779,6 +789,17 @@ internal sealed partial class GenerationRun
     {
         int id = theater.TileId(Math.Max(0, theater.GeneralInt("ClearTile", 0)), 0);
         return id < 0 ? 0 : id;
+    }
+
+    /// <summary>Whether a cell is on a raised terrace (or within a cell of its border), where no other cliff may go.</summary>
+    private bool OnTerrace(CellPos p)
+    {
+        if (raised == null)
+            return false;
+        foreach (var o in CellPos.Neighbours8)
+            if (map.IsValid(p + o) && IsRaisedCell(p + o))
+                return true;
+        return IsRaisedCell(p);
     }
 
     private bool NearProtected(CellPos p, double radius)

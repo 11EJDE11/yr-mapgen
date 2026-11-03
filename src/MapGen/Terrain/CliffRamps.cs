@@ -44,15 +44,24 @@ public static class CliffRamps
 
     /// <summary>The cliff type plus this edge's two slope pieces as ending pieces; null if the theater lacks them.</summary>
     public static ConnectedTileType WithRampEnds(ConnectedTileType cliffType, TheaterData theater, RampEdge edge)
+        => WithRampEnds(cliffType, theater, edge, edge);
+
+    /// <summary>
+    /// The cliff type plus the piece that starts a cliff after a gap on <paramref name="startEdge"/>
+    /// and the piece that ends it before a gap on <paramref name="endEdge"/>, for a cliff that runs
+    /// from one ramp gap round to another.
+    /// </summary>
+    public static ConnectedTileType WithRampEnds(ConnectedTileType cliffType, TheaterData theater, RampEdge startEdge, RampEdge endEdge)
     {
         int setIndex = theater.GeneralInt("CliffRamps", -1);
         var set = theater.TileSet(setIndex);
         if (set == null || set.TilesInSet < 9)
             return null;
 
-        var p = Pieces[edge];
-        var end = MakePiece(theater, set, p.End, p.EndCp, p.EndDir, p.Side, 1000);
-        var start = MakePiece(theater, set, p.Start, p.StartCp, p.StartDir, p.Side, 1001);
+        var pe = Pieces[endEdge];
+        var ps = Pieces[startEdge];
+        var end = MakePiece(theater, set, pe.End, pe.EndCp, pe.EndDir, pe.Side, 1000);
+        var start = MakePiece(theater, set, ps.Start, ps.StartCp, ps.StartDir, ps.Side, 1001);
         if (end == null || start == null)
             return null;
 

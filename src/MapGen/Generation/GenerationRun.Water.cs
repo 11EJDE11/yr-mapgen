@@ -260,9 +260,10 @@ internal sealed partial class GenerationRun
         }
 
         Smooth(land);
-        // Free lakes stay off the lanes (island coasts are mirrored, so they need not).
+        // Free lakes stay off the lanes (island coasts are mirrored, so they need not), and off the
+        // terraces and their borders, where the cliffs go.
         foreach (var p in map.AllValidCells())
-            if (!IsIslandLayout && OnLane(p))
+            if (!IsIslandLayout && OnLane(p) || raised != null && (IsRaisedCell(p) || nearTerraceEdge[p.X, p.Y]))
                 land[p.X, p.Y] = true;
 
         // Inland lakes must not cut the players off from each other: open land bridges if they do.

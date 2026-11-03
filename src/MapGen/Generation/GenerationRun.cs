@@ -151,6 +151,21 @@ internal sealed partial class GenerationRun
 
     private void CreateMap()
     {
+        // The cliff style is decided first: a highland map (raised bases) needs its starts pulled in
+        // and a little more room. Its own random stream, so an explicit style reproduces older seeds.
+        var styleRng = new Random(unchecked(seed * 31 + 7));
+        double styleRoll = styleRng.NextDouble();
+        cliffStyle = settings.CliffStyle == CliffStyle.Mixed
+            ? (styleRoll < 0.5 ? CliffStyle.Terraced : styleRoll < 0.75 ? CliffStyle.Scenic : CliffStyle.Tactical)
+            : settings.CliffStyle;
+        if (cliffStyle == CliffStyle.Terraced)
+        {
+            double shapeRoll = styleRng.NextDouble();
+            terraceShape = shapeRoll < 0.4 ? TerraceShape.Highland : shapeRoll < 0.6 ? TerraceShape.Mesa : TerraceShape.Rolling;
+            if (Enum.TryParse<TerraceShape>(Environment.GetEnvironmentVariable("MAPGEN_TERRACE_SHAPE") ?? "", true, out var forcedShape))
+                terraceShape = forcedShape;
+        }
+
         // Playable area per format (Size units: W columns of 60 px, H rows of 30 px; W = H is square in cell space).
         double area = settings.Format switch
         {
@@ -168,6 +183,9 @@ internal sealed partial class GenerationRun
             scale *= 1.15;
         if (IsBlitz)
             scale *= 0.7;
+        // Raised bases sit on plateaus inside the map, so the map grows to keep the same room between them.
+        if (cliffStyle == CliffStyle.Terraced && terraceShape == TerraceShape.Highland)
+            scale *= 1.2;
         area *= scale * scale * (0.92 + rng.NextDouble() * 0.16);
 
         var shape = settings.Shape == MapShape.Random ? (MapShape)rng.Next(1, 4) : settings.Shape;
@@ -217,9 +235,6 @@ internal sealed partial class GenerationRun
             driftSeedY = rng.Next();
             turnSeed = rng.Next();
         }
-        cliffStyle = settings.CliffStyle == CliffStyle.Mixed
-            ? (rng.NextDouble() < 0.5 ? CliffStyle.Scenic : CliffStyle.Tactical)
-            : settings.CliffStyle;
 
         int n = map.Span;
         zone = new Zone[n, n];

@@ -158,7 +158,7 @@ internal sealed class MainForm : Form
         Row("Time", "Time of day", cbTime);
         Row("Hills", "Hills", tbHills);
         Row("Cliffs", "Cliffs", tbCliffs);
-        Row("CliffStyle", "Cliff style", cbCliffStyle, "Scenic: plateaus and ridges off the routes. Tactical: ridge walls across each approach with a gateway on the route, and plateaus beside the route with the ramp towards the owner. Mixed: chosen per map.");
+        Row("CliffStyle", "Cliff style", cbCliffStyle, "Terraced: the map as a few large height regions with long cliff lines along their borders and ramps where the routes cross; highland maps raise the bases, mesa maps the centre. Scenic: plateaus and ridges off the routes. Tactical: ridge walls across each approach with a gateway on the route, and overlooks beside it. Mixed: chosen per map.");
         Row("Water", "Water", tbWater);
         Row("Trees", "Tree cover", tbTrees);
         Row("Garrisons", "Garrisons", tbGarrisons);
@@ -657,7 +657,7 @@ internal sealed class MainForm : Form
         Choose("Time", cbTime, Pick("Day", "Day", "Dusk", "Night"));
         Slide("Hills", tbHills, 10, 90);
         Slide("Cliffs", tbCliffs, 15, 95);
-        Choose("CliffStyle", cbCliffStyle, Pick("Mixed", "Mixed", "Scenic", "Tactical"));
+        Choose("CliffStyle", cbCliffStyle, Pick("Mixed", "Mixed", "Terraced", "Scenic", "Tactical"));
         Slide("Water", tbWater, 0, 80);
         Slide("Trees", tbTrees, 20, 85);
         Slide("Garrisons", tbGarrisons, 0, 100);

@@ -57,6 +57,11 @@ public enum CliffStyle
     /// route with the ramp facing the owner, so the high ground over the corridor can be held.
     /// </summary>
     Tactical,
+    /// <summary>
+    /// The map as a few large height regions: long cliff lines along their borders with ramps where
+    /// the routes cross. Highland maps raise the bases, mesa maps the centre.
+    /// </summary>
+    Terraced,
 }
 
 [JsonConverter(typeof(JsonStringEnumConverter))]
