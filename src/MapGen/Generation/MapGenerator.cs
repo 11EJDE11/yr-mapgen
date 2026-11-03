@@ -73,7 +73,10 @@ public sealed class MapGenerator
                     continue;
                 }
 
-                double score = result.Report.WorstSpread + result.Report.Problems.Count;
+                // Generator warnings about optional features are not fairness problems (the fairness
+                // metrics would show it if they were); only a broken route is.
+                int hardProblems = result.Report.Problems.Count(p => !p.StartsWith("generator:") || p.Contains("Connectivity"));
+                double score = result.Report.WorstSpread + hardProblems;
                 if (score < bestScore)
                 {
                     bestScore = score;
@@ -89,9 +92,9 @@ public sealed class MapGenerator
                     };
                 }
 
-                if (result.Report.Problems.Count == 0)
+                if (hardProblems == 0)
                     break;
-                progress?.Invoke($"Attempt {attempt + 1} is not fair enough (spread {result.Report.WorstSpread:0.#}%); trying another seed");
+                progress?.Invoke($"Attempt {attempt + 1} is not fair enough ({string.Join("; ", result.Report.Problems.Where(p => !p.StartsWith("generator:") || p.Contains("Connectivity")).Take(2))}); trying another seed");
             }
         }
         finally

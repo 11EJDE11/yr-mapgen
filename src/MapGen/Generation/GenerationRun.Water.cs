@@ -115,7 +115,11 @@ internal sealed partial class GenerationRun
 
         FillWater(lakeWater);
         if (riverCells != null)
+        {
             riverCells.IntersectWith(lakeWater);
+            if (riverCells.Count == 0)
+                throw new GenerationFailedException("The river could not be built");
+        }
     }
 
     /// <summary>
@@ -202,33 +206,23 @@ internal sealed partial class GenerationRun
         // between the teams, ending inside the playable area so it is a lake with shores. The centre
         // stays dry (a ford at the most contested spot); the other routes get bridges. Units are
         // screen half-steps (one unit is about 1.4 cells).
-        bool river = settings.Rivers && settings.Layout == MapLayout.Land && settings.Format != MatchFormat.FourTeamsOfTwo && sym.Kind != SymmetryKind.Diamond;
+        // The river (decided with the map) runs along the y axis through the centre: x = c/2 plus a
+        // gentle wobble. The starts were placed clear of it.
+        bool river = riverPlanned;
         int c0 = map.Width + map.Height;
         const double Wobble = 6;
-        // A mirror symmetry only allows a river along its axis (a cell diagonal, which bridges cross at
-        // 45 degrees, so it is kept narrower). A rotation also allows a river along a cell axis, which
-        // gives short straight bridges. Of the lines allowed, the one that keeps every base furthest
-        // from the water is used; if even that one runs through a base there is no river.
-        var lines = new List<(Func<CellPos, double> Off, Func<CellPos, double> Along, double HalfWidth, string Name)>
-        {
-            (c => (splitTopBottom ? c.X + c.Y - c0 : c.X - c.Y) / 2.0, c => (splitTopBottom ? c.X - c.Y : c.X + c.Y - c0) / 2.0, 3.5 + 1.5 * water, "diagonal"),
-        };
-        if (sym.Kind == SymmetryKind.Rotate180)
-        {
-            lines.Add((c => c.Y - c0 / 2.0, c => c.X - c0 / 2.0, 5.0 + 2.0 * water, "along x"));
-            lines.Add((c => c.X - c0 / 2.0, c => c.Y - c0 / 2.0, 5.0 + 2.0 * water, "along y"));
-        }
-        var riverLine = lines.OrderByDescending(l => players.Min(pl => Math.Abs(l.Off(pl.Position))) - l.HalfWidth).First();
-        var (Off, Along, halfWidth, lineName) = riverLine;
+        double halfWidth = 5.0 + 2.0 * water;
+        double Off(CellPos c) => c.X - c0 / 2.0;
+        double Along(CellPos c) => c.Y - c0 / 2.0;
         double need = halfWidth + Wobble + BaseRadius + 6;
         if (river && players.Any(pl => Math.Abs(Off(pl.Position)) < need))
         {
             if (Environment.GetEnvironmentVariable("MAPGEN_DEBUG") == "1")
-                Console.Error.WriteLine($"RIVER skipped: a base is too close to the middle of the map ({lineName}: offsets {string.Join(" ", players.Select(pl => Math.Abs(Off(pl.Position)).ToString("0")))}, need {need:0})");
+                Console.Error.WriteLine($"RIVER skipped: a base is too close to the middle of the map (offsets {string.Join(" ", players.Select(pl => Math.Abs(Off(pl.Position)).ToString("0")))}, need {need:0})");
             river = false;
         }
         else if (river && Environment.GetEnvironmentVariable("MAPGEN_DEBUG") == "1")
-            Console.Error.WriteLine($"RIVER {lineName}, half width {halfWidth:0.#}");
+            Console.Error.WriteLine($"RIVER along y, half width {halfWidth:0.#}");
         riverCells = river ? new HashSet<CellPos>() : null;
         // How far along its axis the river runs before the playable edge (shortest side).
         double riverReach = river ? map.AllValidCells().Where(p => map.IsInLocal(p, 7)).Max(p => Math.Abs(Along(p))) : 0;
@@ -240,8 +234,11 @@ internal sealed partial class GenerationRun
             // copies match (for a rotation that is the same |along|).
             var c = coastSym.Canonical(p);
             double along = Math.Abs(Along(c));
-            // Straight through the centre (the ford must cut the river in two), winding further out.
-            double wobble = (ValueNoise(along / 22.0, 0.37, seed + 11) * 2 - 1) * Wobble * Math.Clamp((along - 6) / 14.0, 0, 1);
+            // The ford: a strip across the whole river at the centre, so the two halves are separate
+            // bodies with their own shores. Straight there, winding further out.
+            if (along < 7)
+                return false;
+            double wobble = (ValueNoise(along / 22.0, 0.37, seed + 11) * 2 - 1) * Wobble * Math.Clamp((along - 7) / 14.0, 0, 1);
             // The ends taper to a point over the last dozen cells before the playable edge.
             double toEdge = riverReach - along;
             double width = halfWidth * Math.Clamp(toEdge / 12.0, 0.25, 1);
@@ -301,8 +298,11 @@ internal sealed partial class GenerationRun
                 }
                 default:
                 {
-                    // Land with lakes: the highest values of a broad noise field become water.
+                    // Land with lakes: the highest values of a broad noise field become water. No lake
+                    // within reach of the river: a merged body would not get a shore.
                     isLand = LakeNoise(c) < lakeThreshold;
+                    if (river && Math.Abs(Off(p)) < halfWidth + Wobble + 10)
+                        isLand = true;
                     if (InRiver(p))
                     {
                         isLand = false;
@@ -334,7 +334,7 @@ internal sealed partial class GenerationRun
         foreach (var p in map.AllValidCells())
             if (!IsIslandLayout && OnLane(p) && !(riverCells?.Contains(p) ?? false) || raised != null && (IsRaisedCell(p) || nearTerraceEdge[p.X, p.Y]))
                 land[p.X, p.Y] = true;
-            else if (riverCells != null && riverCells.Contains(p) && players.All(pl => pl.Position.DistanceTo(p) >= BaseRadius + 6) && p.DistanceTo(MapCentre()) >= 6)
+            else if (riverCells != null && riverCells.Contains(p) && players.All(pl => pl.Position.DistanceTo(p) >= BaseRadius + 6))
                 land[p.X, p.Y] = false;
 
         if (riverCells != null && Environment.GetEnvironmentVariable("MAPGEN_DEBUG_MASK") == "1")
@@ -560,13 +560,19 @@ internal sealed partial class GenerationRun
             outlines = outlines.DistinctBy(o => o.Centre).ToList();
         }
 
-        if (TryPlanShores(outlines, body, isLand, shoreCells, lakeWater))
-            return true;
-
-        // Tight spots (a narrow neck, a nearby cliff): try once more with the outline pulled inwards.
+        // Tight spots (a narrow neck, a nearby cliff): try again with the outline pulled inwards. A
+        // river is worth several goes, each with a fresh planner seed.
         var shrunk = outlines.Select(o => (o.Vertices.Select(v => new CellPos(
             o.Centre.X + (int)Math.Round((v.X - o.Centre.X) * 0.85), o.Centre.Y + (int)Math.Round((v.Y - o.Centre.Y) * 0.85))).Distinct().ToList(), o.Centre)).ToList();
-        return TryPlanShores(shrunk, body, isLand, shoreCells, lakeWater);
+        int rounds = isRiver ? 3 : 1;
+        for (int round = 0; round < rounds; round++)
+        {
+            if (TryPlanShores(outlines, body, isLand, shoreCells, lakeWater))
+                return true;
+            if (TryPlanShores(shrunk, body, isLand, shoreCells, lakeWater))
+                return true;
+        }
+        return false;
     }
 
     /// <summary>
@@ -636,7 +642,9 @@ internal sealed partial class GenerationRun
         var claimed = new HashSet<CellPos>(shoreCells);
 
         // The planner asks about cells millions of times: precompute everything but the claims.
-        var allowed = CellMask(p => map.IsInLocal(p, 2) && zone[p.X, p.Y] == Zone.Free && (IsIslandLayout || !OnLane(p))
+        // Lanes stay clear of lakes; a river crosses them by design (its bridges are the crossings).
+        bool isRiver = riverCells != null && body.Overlaps(riverCells);
+        var allowed = CellMask(p => map.IsInLocal(p, 2) && zone[p.X, p.Y] == Zone.Free && (IsIslandLayout || isRiver || !OnLane(p))
                                     && !NearZone(p, 2, Zone.Base, Zone.BaseCore, Zone.Cliff, Zone.CliffTop, Zone.Tech, Zone.Resource));
         bool Valid(CellPos p) => map.IsValid(p) && allowed[p.X, p.Y] && !claimed.Contains(p);
 
@@ -658,13 +666,24 @@ internal sealed partial class GenerationRun
             foreach (var (reversed, side) in ShoreOrientations(isLand))
             {
                 var verts = reversed ? Enumerable.Reverse(outline).ToList() : outline;
-                var result = ConnectedTilePlanner.Plan(shoreType, verts, side, planSeed, useEndPieces: false, closed: true, Valid, ShoreSearchLimit);
+                // A river is long and there are only two of them: worth a much deeper search than a lake.
+                int limit = isRiver && int.TryParse(Environment.GetEnvironmentVariable("MAPGEN_RIVER_SHORE_LIMIT"), out int l) ? l : isRiver ? ShoreSearchLimit * 10 : ShoreSearchLimit;
+                var result = ConnectedTilePlanner.Plan(shoreType, verts, side, planSeed, useEndPieces: false, closed: true, Valid, limit);
+                bool dbg = Environment.GetEnvironmentVariable("MAPGEN_DEBUG") == "1" && body.Count > 150;
                 if (!result.Success)
+                {
+                    if (dbg)
+                        Console.Error.WriteLine($"    shore {(reversed ? "rev" : "fwd")}/{side}: planner {result.Status}");
                     continue;
+                }
                 var cells = FoundationCells(result.Plan.Placements);
                 var flood = FloodInside(centre, cells, body.Count * 3 + 400);
                 if (flood == null || flood.Count < 6 || !ShoreFacesWater(result.Plan, flood, cells, waterInside: !isLand))
+                {
+                    if (dbg)
+                        Console.Error.WriteLine($"    shore {(reversed ? "rev" : "fwd")}/{side}: {(flood == null ? "flood leaks" : flood.Count < 6 ? "flood tiny" : "faces wrong way (" + ShoreViolations(result.Plan, flood, cells, !isLand) + " of " + result.Plan.Placements.Count + ")")}");
                     continue;
+                }
                 (plan, inside) = (result.Plan, flood);
                 workingShoreOrientation[isLand ? 1 : 0] = (reversed, side);
                 break;

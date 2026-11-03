@@ -56,14 +56,28 @@ internal sealed partial class GenerationRun
     /// Decides which blocks are raised. <paramref name="amount"/> (the Cliffs slider) sets how much of
     /// the map is terrace; the shape decides where it tends to be.
     /// </summary>
-    private void PlanTerraces(double amount)
+    /// <summary>
+    /// Grid lines at c/2 + k*Block: c is even, so the centre line is a grid line and mirrors and
+    /// rotations about the centre map the grid onto itself. Set up with the map, so starts can snap to it.
+    /// </summary>
+    private void SetupBlockGrid()
     {
         int c = map.Width + map.Height;
-        // Grid lines at c/2 + k*Block: c is even, so the centre line is a grid line and mirrors and
-        // rotations about the centre map the grid onto itself.
         int k = (c / 2) / Block + 1;
         blockOrigin = c / 2 - k * Block;
         blockCount = 2 * k + 1;
+    }
+
+    /// <summary>The nearest block centre: a base there has its whole forced area as a tidy 3x3 of blocks.</summary>
+    private CellPos SnapToBlockCentre(CellPos p)
+    {
+        int i = (int)Math.Round((p.X - blockOrigin - Block / 2.0) / Block);
+        int j = (int)Math.Round((p.Y - blockOrigin - Block / 2.0) / Block);
+        return BlockCentre(i, j);
+    }
+
+    private void PlanTerraces(double amount)
+    {
         raised = new bool[blockCount, blockCount];
 
         int seed = rng.Next();
@@ -297,6 +311,24 @@ internal sealed partial class GenerationRun
     /// </summary>
     private void SeparateRegions()
     {
+        // Two base shelves too close for separate cliffs become one shelf: the blocks between them
+        // are raised first (symmetric, since the shelves are).
+        for (int i = 0; i < blockCount; i++)
+            for (int j = 0; j < blockCount; j++)
+            {
+                if (!forcedBase[i, j])
+                    continue;
+                for (int di = -2; di <= 2; di++)
+                    for (int dj = -2; dj <= 2; dj++)
+                    {
+                        int x = i + di, y = j + dj;
+                        if (x < 0 || y < 0 || x >= blockCount || y >= blockCount || !forcedBase[x, y] || (di == 0 && dj == 0))
+                            continue;
+                        for (int a = Math.Min(i, x); a <= Math.Max(i, x); a++)
+                            for (int b = Math.Min(j, y); b <= Math.Max(j, y); b++)
+                                raised[a, b] = true;
+                    }
+            }
         var regions = RaisedRegions();
         var owner = new int[blockCount, blockCount];
         for (int r = 0; r < regions.Count; r++)

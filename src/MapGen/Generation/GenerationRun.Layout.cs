@@ -17,7 +17,7 @@ internal sealed partial class GenerationRun
 
     private void PlaceStarts()
     {
-        for (int round = 0; round < 2; round++)
+        for (int round = 0; round < 3; round++)
         {
             for (int attempt = 0; attempt < 300; attempt++)
             {
@@ -28,18 +28,58 @@ internal sealed partial class GenerationRun
                     _ => PickTemplateStarts(),
                 };
                 if (ok && BuildPlayers())
+                {
+                    if (Environment.GetEnvironmentVariable("MAPGEN_DEBUG") == "1")
+                        Console.Error.WriteLine($"STARTS round {round} attempt {attempt}: river {riverPlanned}, sym {sym.Kind}, {string.Join(" ", players.Select(pl => pl.Position))}");
                     return;
+                }
             }
-            // Raised bases need more room than this map has: settle for bases on the lowland.
-            if (cliffStyle != CliffStyle.Terraced || terraceShape != TerraceShape.Highland)
+            if (Environment.GetEnvironmentVariable("MAPGEN_DEBUG") == "1")
+                Console.Error.WriteLine($"STARTS round {round} failed (river {riverPlanned}, shape {terraceShape}, templates {Templates().Count()})");
+            // Raised bases need more room than this map has: settle for bases on the lowland. A river
+            // the bases cannot keep clear of is dropped.
+            if (riverPlanned)
+                riverPlanned = false;
+            else if (cliffStyle == CliffStyle.Terraced && terraceShape == TerraceShape.Highland)
+                terraceShape = TerraceShape.Rolling;
+            else
                 break;
-            terraceShape = TerraceShape.Rolling;
         }
         throw new GenerationFailedException("Could not place start locations");
     }
 
+    /// <summary>With a river along the y axis through the centre, each side keeps this many cells from the middle line.</summary>
+    private double RiverClearance => 5.0 + 2.0 * Math.Clamp(settings.Water, 0, 1) + 6 + BaseRadius + 6;
+
     private IEnumerable<StartTemplate> Templates()
     {
+        // A river map splits the sides along a cell axis: one whole team in the top-left quarter of
+        // the screen, the other (its rotated image) in the bottom-right.
+        if (riverPlanned && settings.Format != MatchFormat.Duel)
+        {
+            return settings.Format switch
+            {
+                MatchFormat.TwoVsTwo => new[]
+                {
+                    new StartTemplate(0.07, 0.17, 0.08, 0.22),
+                    new StartTemplate(0.24, 0.36, 0.22, 0.38),
+                },
+                MatchFormat.ThreeVsThree => new[]
+                {
+                    new StartTemplate(0.06, 0.14, 0.07, 0.19),
+                    new StartTemplate(0.21, 0.31, 0.10, 0.24),
+                    new StartTemplate(0.12, 0.24, 0.30, 0.42),
+                },
+                MatchFormat.FourVsFour => new[]
+                {
+                    new StartTemplate(0.05, 0.13, 0.06, 0.16),
+                    new StartTemplate(0.19, 0.29, 0.07, 0.17),
+                    new StartTemplate(0.07, 0.17, 0.26, 0.38),
+                    new StartTemplate(0.25, 0.35, 0.24, 0.36),
+                },
+                _ => throw new GenerationFailedException("Unsupported format for a river map"),
+            };
+        }
         if (sym.Kind == SymmetryKind.Quad)
         {
             // One quarter of the map; the other three are mirror images.
@@ -109,6 +149,12 @@ internal sealed partial class GenerationRun
             var p = splitTopBottom ? map.FromNormalisedLocal(b, a) : map.FromNormalisedLocal(a, b);
             if (t.OnAxis)
                 p = splitTopBottom ? SnapToVerticalAxis(p) : SnapToHorizontalAxis(p);
+            // A raised base sits in the middle of a block, so its cliff follows the block borders.
+            if (cliffStyle == CliffStyle.Terraced && terraceShape == TerraceShape.Highland)
+                p = SnapToBlockCentre(p);
+            // The river runs along x = c/2: this side stays on the small-x side of it.
+            if (riverPlanned && p.X > (map.Width + map.Height) / 2.0 - RiverClearance)
+                return false;
             if (!IsGoodStart(p))
                 return false;
             canonicalStarts.Add(p);

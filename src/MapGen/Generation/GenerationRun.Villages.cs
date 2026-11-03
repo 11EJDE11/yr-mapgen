@@ -13,21 +13,21 @@ internal sealed partial class GenerationRun
     // ---------------------------------------------------------------- trail network
 
     /// <summary>
-    /// Beyond each player's own trails: one towards the centre (stopping well short of it) and one to
-    /// the nearest teammate, so the trails read as a road network rather than driveways.
+    /// Beyond each player's own trails: one to the centre building (when there is one) and one to the
+    /// nearest teammate, so every trail joins two things and the trails read as a road network.
     /// </summary>
     private void PlaceTrailNetwork(ConnectedTileType roadType)
     {
         var centre = MapCentre();
+        var centreBuilding = sharedTech.OrderBy(s => s.Position.DistanceTo(centre)).FirstOrDefault(s => s.Position.DistanceTo(centre) < 8);
         var done = new HashSet<(PlayerSlot, PlayerSlot)>();
         foreach (var pl in players)
         {
-            if (rng.NextDouble() < 0.7)
+            if (centreBuilding != null && rng.NextDouble() < 0.5)
             {
-                double f = 0.5 + rng.NextDouble() * 0.2;
-                var towards = new CellPos((int)Math.Round(pl.Position.X + (centre.X - pl.Position.X) * f), (int)Math.Round(pl.Position.Y + (centre.Y - pl.Position.Y) * f));
-                if (IsUsable(towards))
-                    TryPlaceTrail(roadType, pl.Position, new List<(PlayerSlot, CellPos, double)> { (pl, towards, 0) });
+                var (w, h) = theater.Building(centreBuilding.Type).FoundationSize;
+                var target = new CellPos(centreBuilding.Position.X + w / 2, centreBuilding.Position.Y + h / 2);
+                TryPlaceTrail(roadType, pl.Position, new List<(PlayerSlot, CellPos, double)> { (pl, target, Math.Max(w, h) / 2.0 + 2.5) });
             }
 
             var mate = players.Where(o => o != pl && o.Team == pl.Team).OrderBy(o => o.Position.DistanceTo(pl.Position)).FirstOrDefault();
@@ -115,6 +115,7 @@ internal sealed partial class GenerationRun
                     if (zone[p.X, p.Y] == Zone.Free)
                         zone[p.X, p.Y] = Zone.Open;
                     roadCells.Add(p);
+                    this.roadCells.Add(p);
                 }
         }
 
@@ -180,17 +181,14 @@ internal sealed partial class GenerationRun
 
     // ---------------------------------------------------------------- bridges
 
+    /// <summary>Whether this map gets a river (decided with the map; dropped if the starts cannot keep clear of it).</summary>
+    private bool riverPlanned;
+
     /// <summary>Cells under a river (water the routes must cross): set while the land mask is built.</summary>
     private HashSet<CellPos> riverCells;
 
-    /// <summary>Open water (not shore): where a bridge deck goes.</summary>
-    private bool IsWaterTile(CellPos p)
-    {
-        if (!map.IsValid(p) || zone[p.X, p.Y] != Zone.Water)
-            return false;
-        var sub = theater.Tile(map[p].TileIndex)?.GetSubTile(map[p].SubTile);
-        return sub != null && sub.TerrainType == TmpWater;
-    }
+    /// <summary>Water or beach: what a bridge deck spans (the ramp pieces sit on the dry ground beyond).</summary>
+    private bool IsWaterTile(CellPos p) => map.IsValid(p) && zone[p.X, p.Y] == Zone.Water;
 
     /// <summary>
     /// Low bridges where each player's route to the centre crosses the river: three lanes wide, a
@@ -213,7 +211,7 @@ internal sealed partial class GenerationRun
         int built = 0;
         if (Environment.GetEnvironmentVariable("MAPGEN_DEBUG") == "1")
         {
-            Console.Error.WriteLine($"BRIDGES river cells {riverCells.Count}, open water among them {riverCells.Count(IsWaterTile)}, zone Water {riverCells.Count(c => zone[c.X, c.Y] == Zone.Water)}");
+            Console.Error.WriteLine($"BRIDGES river cells {riverCells.Count}");
             var pl0 = players[0];
             double ddx = centre.X - pl0.Position.X, ddy = centre.Y - pl0.Position.Y, ll = Math.Max(1, Math.Sqrt(ddx * ddx + ddy * ddy));
             var line = new List<string>();
@@ -302,9 +300,10 @@ internal sealed partial class GenerationRun
         var across = alongX ? new CellPos(0, 1) : new CellPos(1, 0);
         var first = span[0] - step;
         var last = span[^1] + step;
-        // The ramp pieces sit on the shore (or flat ground at water level) with nothing on it.
-        bool LandOk(CellPos p) => IsUsable(p) && !IsWaterTile(p) && zone[p.X, p.Y] is Zone.Free or Zone.Open or Zone.Water
-                                  && (zone[p.X, p.Y] == Zone.Water || IsFlatGround(p) && GroundLevel(p) == 0) && map[p].Level == 0;
+        // The ramp pieces sit on dry ground at water level with nothing on it: the land side of a
+        // shore tile, or flat clear ground.
+        bool LandOk(CellPos p) => IsUsable(p) && zone[p.X, p.Y] is Zone.Free or Zone.Open && map[p].Level == 0
+                                  && (tilePlaced[p.X, p.Y] || IsFlatGround(p));
 
         foreach (int shift in new[] { 0, -1, 1, -2, 2 })
         {

@@ -157,9 +157,13 @@ internal sealed partial class GenerationRun
         cliffStyle = settings.CliffStyle == CliffStyle.Mixed
             ? (styleRoll < 0.65 ? CliffStyle.Terraced : styleRoll < 0.85 ? CliffStyle.Tactical : CliffStyle.Scenic)
             : settings.CliffStyle;
-        // A river needs the open lowland of the scenic and tactical styles.
-        bool riverMap = settings.Rivers && settings.Layout == MapLayout.Land && settings.Format != MatchFormat.FourTeamsOfTwo;
-        if (riverMap && cliffStyle == CliffStyle.Terraced)
+        // A river: rolled for about a quarter of land maps unless asked for. It runs along a cell axis
+        // through the centre, which only the 180-degree symmetry allows, and needs the open lowland of
+        // the scenic and tactical cliff styles.
+        bool riverWanted = settings.Rivers ?? styleRng.NextDouble() < 0.25;
+        riverPlanned = riverWanted && settings.Layout == MapLayout.Land && settings.Format != MatchFormat.FourTeamsOfTwo
+                       && (settings.Symmetry == null || settings.Symmetry == SymmetryKind.Rotate180 || settings.Rivers == true);
+        if (riverPlanned && cliffStyle == CliffStyle.Terraced)
             cliffStyle = styleRoll < 0.5 ? CliffStyle.Tactical : CliffStyle.Scenic;
         if (cliffStyle == CliffStyle.Terraced)
         {
@@ -190,12 +194,12 @@ internal sealed partial class GenerationRun
         area *= scale * scale * (0.92 + rng.NextDouble() * 0.16);
 
         var shape = settings.Shape == MapShape.Random ? (MapShape)rng.Next(1, 4) : settings.Shape;
-        var kind = settings.Symmetry ?? DefaultSymmetry(shape);
+        var kind = riverPlanned ? SymmetryKind.Rotate180 : settings.Symmetry ?? DefaultSymmetry(shape);
         if (!GeneratorSettings.AllowedSymmetries(settings.Format).Contains(kind))
             throw new GenerationFailedException($"{kind} symmetry does not work for {settings.FormatLabel}");
         // Without symmetry only the terrain is free: bases, resources and tech still need one to be fair.
         bool freeTerrain = kind == SymmetryKind.None || Asymmetric;
-        if (freeTerrain)
+        if (kind == SymmetryKind.None)
             kind = FeatureSymmetry(shape);
         if (kind == SymmetryKind.Diamond)
             shape = MapShape.Square;
@@ -249,6 +253,8 @@ internal sealed partial class GenerationRun
 
         foreach (var p in map.AllValidCells())
             usable[p.X, p.Y] = sym.Orbit(p).All(q => map.IsInLocal(q, 1));
+
+        SetupBlockGrid();
     }
 
     private SymmetryKind DefaultSymmetry(MapShape shape)

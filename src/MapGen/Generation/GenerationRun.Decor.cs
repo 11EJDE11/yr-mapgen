@@ -44,6 +44,9 @@ internal sealed partial class GenerationRun
     private readonly List<StructureObject> sharedTech = new();
     private readonly List<CellPos> wallCells = new();
 
+    /// <summary>Cells covered by trail and village road tiles (their verges are painted, props line them).</summary>
+    private readonly HashSet<CellPos> roadCells = new();
+
     private string[] Trees => TreesByTheater.TryGetValue(map.Theater, out var t)
         ? t.Where(n => theater.TerrainType(n)?.Available == true).ToArray()
         : Array.Empty<string>();
@@ -279,6 +282,7 @@ internal sealed partial class GenerationRun
             tilePlaced[p.X, p.Y] = true;
             if (zone[p.X, p.Y] == Zone.Free)
                 zone[p.X, p.Y] = Zone.Open;
+            roadCells.Add(p);
         }
         return true;
     }
@@ -333,53 +337,119 @@ internal sealed partial class GenerationRun
     /// following WAE's AutoLAT rules: a painted cell uses the ground tile when all four iso neighbours
     /// are the same ground, otherwise transition tile N where N has a bit per differing neighbour.
     /// </summary>
+    /// <summary>The LAT grounds of a theater, by role. What each looks like differs per theater (see PaintGround).</summary>
+    private enum Ground { None, Rough, Sand, Green, Pave }
+
+    private (int Ground, int Lat)? GroundSets(Ground g)
+    {
+        var (tileKey, latKey) = g switch
+        {
+            Ground.Rough => ("RoughTile", "ClearToRoughLat"),
+            Ground.Sand => ("SandTile", "ClearToSandLat"),
+            Ground.Green => ("GreenTile", "ClearToGreenLat"),
+            _ => ("PaveTile", "ClearToPaveLat"),
+        };
+        int t = theater.GeneralInt(tileKey), l = theater.GeneralInt(latKey);
+        if (t < 0 || l < 0)
+            return null;
+        var gt = theater.Tile(theater.TileId(t, 0));
+        var lt = theater.Tile(theater.TileId(l, 0));
+        if (gt == null || gt.Missing || lt == null || lt.Missing || theater.TileSet(l).TilesInSet < 16)
+            return null;
+        return (t, l);
+    }
+
+    /// <summary>
+    /// Ground variety and blending. Patches of the theater's other grounds from noise, a verge of
+    /// the matching ground round shores and roads so their built-in edges blend into the clear
+    /// ground, and the LAT transition tiles along every edge. Per theater the sets look like:
+    ///   Temperate: Rough = dark grass, Sand = dirt, Green = sand, Pave = concrete.
+    ///   Urban (clear is concrete): Rough = dirt, Sand = gravel, Green = grass, Pave = brick.
+    ///   NewUrban (clear is grass): Rough = dark grass, Sand = dirt, Green = sand, Pave = earth.
+    ///   Snow: Rough = grass, Sand = rock, Green = ice, Pave = pavement.
+    ///   Desert: Rough = scrub, Sand = rough sand, Green = light sand, Pave = concrete.
+    /// </summary>
     private void PaintGround()
     {
-        // Urban/lunar LAT sets do not blend like the natural ones (hard-edged blocks in renders).
-        if (map.Theater is not ("TEMPERATE" or "SNOW" or "DESERT"))
+        if (Environment.GetEnvironmentVariable("MAPGEN_GROUND_TEST") == "1")
+        {
+            PaintGroundTest();
+            return;
+        }
+        if (map.Theater == "LUNAR")
             return;
 
-        var grounds = new List<(int Ground, int Transition)>();
-        foreach (var (tileKey, latKey) in new[] { ("RoughTile", "ClearToRoughLat"), ("SandTile", "ClearToSandLat"), ("GreenTile", "ClearToGreenLat") })
+        // Noise patches: (ground, scale, threshold). Lower threshold = more of it.
+        var patches = map.Theater switch
         {
-            int g = theater.GeneralInt(tileKey), l = theater.GeneralInt(latKey);
-            if (g < 0 || l < 0)
-                continue;
-            var gt = theater.Tile(theater.TileId(g, 0));
-            var lt = theater.Tile(theater.TileId(l, 0));
-            if (gt == null || gt.Missing || lt == null || lt.Missing || theater.TileSet(l).TilesInSet < 16)
-                continue;
-            grounds.Add((g, l));
-        }
-        if (grounds.Count == 0)
-            return;
+            "URBAN" => new[] { (Ground.Green, 14.0, 0.56), (Ground.Rough, 7.0, 0.72), (Ground.Pave, 9.0, 0.74), (Ground.Sand, 6.0, 0.78) },
+            "NEWURBAN" => new[] { (Ground.Rough, 9.0, 0.66), (Ground.Sand, 7.0, 0.74), (Ground.Pave, 8.0, 0.78) },
+            "SNOW" => new[] { (Ground.Rough, 9.0, 0.68), (Ground.Sand, 7.0, 0.72), (Ground.Green, 10.0, 0.76) },
+            "DESERT" => new[] { (Ground.Sand, 9.0, 0.64), (Ground.Rough, 7.0, 0.74), (Ground.Green, 11.0, 0.72) },
+            _ => new[] { (Ground.Rough, 9.0, 0.66), (Ground.Sand, 7.0, 0.70), (Ground.Green, 12.0, 0.80) },
+        };
+        // Verges: the ground that matches a shore's beach and a road's shoulder.
+        Ground shoreVerge = map.Theater switch { "TEMPERATE" => Ground.Green, "URBAN" => Ground.Green, "SNOW" => Ground.Green, _ => Ground.None };
+        Ground roadVerge = map.Theater switch { "NEWURBAN" => Ground.Sand, "TEMPERATE" => Ground.Sand, "DESERT" => Ground.Sand, "SNOW" => Ground.Rough, _ => Ground.None };
+
+        var sets = new Dictionary<Ground, (int Ground, int Lat)>();
+        foreach (var g in new[] { Ground.Rough, Ground.Sand, Ground.Green, Ground.Pave })
+            if (GroundSets(g) is { } gs)
+                sets[g] = gs;
 
         int seed = rng.Next();
-        var painted = new int[map.Span, map.Span];
+        var painted = new Ground[map.Span, map.Span];
+        bool Paintable(CellPos p) => map.IsValid(p) && !tilePlaced[p.X, p.Y] && heights.IsFlat(p);
+
         foreach (var p in map.AllValidCells())
         {
-            if (tilePlaced[p.X, p.Y] || !heights.IsFlat(p))
+            if (!Paintable(p))
                 continue;
             var c = terrain.Canonical(p);
-            for (int i = 0; i < grounds.Count && i < 2; i++)
+            for (int i = 0; i < patches.Length; i++)
             {
-                double n = ValueNoise(c.X / 9.0, c.Y / 9.0, seed + i * 31) * 0.7 + ValueNoise(c.X / 4.0, c.Y / 4.0, seed + i * 31 + 7) * 0.3;
+                var (g, scale, threshold) = patches[i];
+                if (!sets.ContainsKey(g))
+                    continue;
+                double n = ValueNoise(c.X / scale, c.Y / scale, seed + i * 31) * 0.7 + ValueNoise(c.X / (scale * 0.45), c.Y / (scale * 0.45), seed + i * 31 + 7) * 0.3;
                 // Rough ground also gathers around ore fields, as on the shipped maps.
                 bool nearOre = i == 0 && Disk(p, 2.5).Any(q => map.IsValid(q) && zone[q.X, q.Y] == Zone.Resource);
-                if (n > 0.66 || nearOre && n > 0.45)
+                if (n > threshold || nearOre && n > threshold - 0.2)
                 {
-                    painted[p.X, p.Y] = i + 1;
+                    painted[p.X, p.Y] = g;
                     break;
                 }
             }
         }
 
+        // Verges override patches: one cell always, a second one where the noise says so, for an
+        // edge that is not a straight band.
+        void Verge(Func<CellPos, bool> source, Ground g)
+        {
+            if (g == Ground.None || !sets.ContainsKey(g))
+                return;
+            var ring = new List<CellPos>();
+            foreach (var p in map.AllValidCells())
+            {
+                if (!Paintable(p))
+                    continue;
+                bool near1 = CellPos.Neighbours8.Any(o => source(p + o));
+                bool near2 = !near1 && Disk(p, 2.3).Any(source) && ValueNoise(p.X / 5.0, p.Y / 5.0, seed + 99) > 0.45;
+                if (near1 || near2)
+                    ring.Add(p);
+            }
+            foreach (var p in ring)
+                painted[p.X, p.Y] = g;
+        }
+        Verge(q => map.IsValid(q) && zone[q.X, q.Y] == Zone.Water, shoreVerge);
+        Verge(q => roadCells.Contains(q), roadVerge);
+
         foreach (var p in map.AllValidCells())
         {
-            int g = painted[p.X, p.Y];
-            if (g == 0)
+            var g = painted[p.X, p.Y];
+            if (g == Ground.None)
                 continue;
-            var (ground, transition) = grounds[g - 1];
+            var (ground, transition) = sets[g];
             int mask = 0;
             foreach (var (o, bit) in IsoNeighbours)
             {
@@ -390,6 +460,32 @@ internal sealed partial class GenerationRun
             ref var cell = ref map[p];
             cell.TileIndex = mask == 0 ? theater.TileId(ground, 0) : theater.TileId(transition, mask);
             cell.SubTile = 0;
+        }
+    }
+
+    /// <summary>Debugging aid: a disc of each LAT ground with its transition ring, in a row across the map.</summary>
+    private void PaintGroundTest()
+    {
+        var keys = new[] { ("RoughTile", "ClearToRoughLat"), ("SandTile", "ClearToSandLat"), ("GreenTile", "ClearToGreenLat"), ("PaveTile", "ClearToPaveLat") };
+        var centre = MapCentre();
+        for (int i = 0; i < keys.Length; i++)
+        {
+            int g = theater.GeneralInt(keys[i].Item1), l = theater.GeneralInt(keys[i].Item2);
+            if (g < 0 || l < 0)
+                continue;
+            var at = new CellPos(centre.X + (i - 1) * 14 - 7, centre.Y - (i - 1) * 14 + 7);
+            var disc = Disk(at, 6).Where(p => map.IsValid(p) && !tilePlaced[p.X, p.Y] && heights.IsFlat(p)).ToHashSet();
+            foreach (var p in disc)
+            {
+                int mask = 0;
+                foreach (var (o, bit) in IsoNeighbours)
+                    if (!disc.Contains(p + o))
+                        mask |= bit;
+                ref var cell = ref map[p];
+                cell.TileIndex = mask == 0 ? theater.TileId(g, 0) : theater.TileId(l, mask);
+                cell.SubTile = 0;
+            }
+            Console.Error.WriteLine($"GROUND {keys[i].Item1}: set {g} '{theater.TileSet(g)?.Name}' with LAT {l} '{theater.TileSet(l)?.Name}' at {at}");
         }
     }
 

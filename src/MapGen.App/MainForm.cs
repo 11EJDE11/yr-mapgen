@@ -18,7 +18,7 @@ internal sealed class MainForm : Form
 
     private ComboBox cbLayout, cbFormat, cbSize, cbShape, cbTheater, cbResources, cbGems, cbEconomy, cbSymmetry, cbTime, cbCliffStyle;
     private TrackBar tbHills, tbCliffs, tbWater, tbTrees, tbGarrisons, tbVillages, tbOreSize, tbGemSize, tbDrills, tbAsymmetry, tbFairness;
-    private CheckBox chkTrails, chkWalls, chkRivers;
+    private CheckBox chkTrails, chkWalls;
     private NumericUpDown nudSeed;
     private CheckBox chkDefaultTech;
     /// <summary>Padlock per setting: a locked setting is kept by "Random unlocked" (and a locked seed by Generate).</summary>
@@ -138,7 +138,6 @@ internal sealed class MainForm : Form
         tbFairness = Slider();
         tbGarrisons = Slider();
         tbVillages = Slider();
-        chkRivers = new CheckBox { Text = "River between the sides, with bridges", AutoSize = true };
         tbOreSize = Slider(25, 250);
         tbGemSize = Slider(25, 250);
         tbDrills = Slider();
@@ -163,7 +162,6 @@ internal sealed class MainForm : Form
         Row("Trees", "Tree cover", tbTrees);
         Row("Garrisons", "Garrisons", tbGarrisons);
         Row("Villages", "Villages", tbVillages, "Villages: a few civilian buildings on a short road with a fence, near the contested ground.");
-        Row("Rivers", "", chkRivers, "Locked: the river setting is kept when you press Random. A river crosses the map between the sides (land layouts only); the routes get low bridges and the centre stays a ford.");
         Row("Trails", "", chkTrails, "Locked: dirt trails are kept as set when you press Random.");
         Row("Walls", "", chkWalls, "Locked: sandbags are kept as set when you press Random.");
         Row("Resources", "Resources", cbResources);
@@ -368,7 +366,6 @@ internal sealed class MainForm : Form
         tbWater.Value = Percent(s.Water);
         tbGarrisons.Value = Percent(s.Garrisons);
         tbVillages.Value = Percent(s.Villages);
-        chkRivers.Checked = s.Rivers;
         tbOreSize.Value = Math.Clamp((int)Math.Round(s.OreFieldSize * 100), tbOreSize.Minimum, tbOreSize.Maximum);
         tbGemSize.Value = Math.Clamp((int)Math.Round(s.GemFieldSize * 100), tbGemSize.Minimum, tbGemSize.Maximum);
         tbDrills.Value = Percent(s.Drills);
@@ -412,7 +409,6 @@ internal sealed class MainForm : Form
             Water = tbWater.Value / 100.0,
             Garrisons = tbGarrisons.Value / 100.0,
             Villages = tbVillages.Value / 100.0,
-            Rivers = chkRivers.Checked,
             OreFieldSize = tbOreSize.Value / 100.0,
             GemFieldSize = tbGemSize.Value / 100.0,
             Drills = tbDrills.Value / 100.0,
@@ -665,7 +661,6 @@ internal sealed class MainForm : Form
         Slide("Trees", tbTrees, 20, 85);
         Slide("Garrisons", tbGarrisons, 0, 100);
         Slide("Villages", tbVillages, 0, 100);
-        Tick("Rivers", chkRivers, 0.35);
         Tick("Trails", chkTrails, 0.8);
         Tick("Walls", chkWalls, 0.7);
         Choose("Resources", cbResources, Pick("Low", "Medium", "Medium", "High", "VeryHigh"));

@@ -38,7 +38,7 @@ yr-mapgen analyze "Maps/Yuri's Revenge/tourofegypt.map"
 | `--fairness` | 0..1. How strictly equivalent starts must match: 1 = within about 15%, 0 = four times looser (asymmetric maps settle sooner) |
 | `--theater` | `temperate`, `snow`, `urban`, `newurban`, `desert`, `lunar` |
 | `--hills`, `--cliffs`, `--water`, `--trees`, `--villages` | 0..1 |
-| `--rivers` | `yes`: a river across the map between the sides with low bridges where the routes cross it; the centre stays a ford (land layouts) |
+| `--rivers` | `yes`, `no`, `random` (default: about a quarter of land maps). A river between the sides with low bridges where the routes cross it; the centre stays a ford. Needs the 180-degree symmetry, which it picks unless a symmetry was set |
 | `--cliffstyle` | `mixed` (per map), `terraced` (a few large height regions with long cliff lines along their borders and ramps where the routes cross; highland maps raise the bases, mesa maps the centre), `scenic` (plateaus off the routes), `tactical` (ridge walls with a gateway across each approach, ramped plateaus beside the route facing the owner) |
 | `--resources` | `low`, `medium`, `high`, `veryhigh` |
 | `--orefields`, `--gemfields` | size multiplier (1 = default) |
