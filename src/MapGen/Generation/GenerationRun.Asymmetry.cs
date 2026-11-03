@@ -17,7 +17,10 @@ internal sealed partial class GenerationRun
     private int driftSeedX, driftSeedY, turnSeed;
 
     /// <summary>How far a player's own features turn about their start at full asymmetry.</summary>
-    private const double MaxTurn = 35 * Math.PI / 180;
+    private const double MaxTurn = 50 * Math.PI / 180;
+
+    /// <summary>How much nearer or further a player's own features may sit at full asymmetry (the fairness check catches the rest).</summary>
+    private const double MaxStretch = 0.15;
 
     /// <summary>Shared features (contested fields, team and contested tech) drift this much less: they must stay about equidistant.</summary>
     private const double SharedDriftScale = 0.5;
@@ -73,7 +76,8 @@ internal sealed partial class GenerationRun
         var pos = Warp(s);
         var q = sym.Apply(t, p);
         double theta = (ValueNoise(s.X / DriftScale, s.Y / DriftScale, turnSeed) * 2 - 1) * MaxTurn * Asym;
-        double ox = q.X - s.X, oy = q.Y - s.Y;
+        double stretch = 1 + (ValueNoise(s.X / DriftScale, s.Y / DriftScale, turnSeed + 1) * 2 - 1) * MaxStretch * Asym;
+        double ox = (q.X - s.X) * stretch, oy = (q.Y - s.Y) * stretch;
         double rx = ox * Math.Cos(theta) - oy * Math.Sin(theta);
         double ry = ox * Math.Sin(theta) + oy * Math.Cos(theta);
         var (jx, jy) = Drift(q, 0.25);

@@ -66,7 +66,16 @@ internal sealed partial class GenerationRun
         if (cliffType == null)
             return;
 
-        int target = (int)Math.Round(amount * CanonicalUsableCells / (IsBlitz ? 700.0 : 520.0));
+        // Tactical cliffs first, so they get the spots that matter; scenery then fills in round them
+        // at a lower rate.
+        double scenic = amount;
+        if (cliffStyle == CliffStyle.Tactical)
+        {
+            PlaceTacticalCliffs(cliffType, amount);
+            scenic *= 0.25;
+        }
+
+        int target = (int)Math.Round(scenic * CanonicalUsableCells / (IsBlitz ? 700.0 : 520.0));
         target = Math.Max(1, target);
         int placed = 0;
 
@@ -90,6 +99,8 @@ internal sealed partial class GenerationRun
         }
 
         // Too little room for cliffs (small islands, crowded maps) is not a fairness problem.
+        if (Environment.GetEnvironmentVariable("MAPGEN_DEBUG") == "1")
+            Console.Error.WriteLine($"CLIFFS scenic placed {placed} of {target} ({cliffType.IniName})");
     }
 
     private bool TryPlaceCliffPlateau(ConnectedTileType cliffType, bool ridge)
@@ -130,8 +141,16 @@ internal sealed partial class GenerationRun
                 if (images[i].DistanceTo(images[j]) < extent * 2 + 3)
                     return false;
 
-        // A convex outline, counter-clockwise on screen starting at the bottom: with Front-side cliffs
-        // this raises the inside (verified by rendering every orientation).
+        var outline = PlateauOutline(rx, ry, rotation);
+        return TryPlaceClosedCliff(cliffType, centre, outline, (int)(Math.PI * rx * ry * 4) + 80, terrain, t => terrain.Apply(t, centre), keepRoutes: false);
+    }
+
+    /// <summary>
+    /// A convex outline in screen-space steps (r right, d down), counter-clockwise on screen starting
+    /// at the bottom: with Front-side cliffs this raises the inside (verified by rendering every orientation).
+    /// </summary>
+    private List<(double r, double d)> PlateauOutline(double rx, double ry, double rotation)
+    {
         int vertexCount = rng.Next(5, 9);
         double phase = rng.NextDouble() * 2 * Math.PI / vertexCount;
         var outline = new List<(double r, double d)>();
@@ -142,49 +161,99 @@ internal sealed partial class GenerationRun
             double r = rx * Math.Cos(a) * s, d = ry * Math.Sin(a) * s;
             outline.Add((r * Math.Cos(rotation) - d * Math.Sin(rotation), r * Math.Sin(rotation) + d * Math.Cos(rotation)));
         }
+        return outline;
+    }
 
-        CellPos ToCell(CellPos c, (double r, double d) v)
-            => new(c.X + (int)Math.Round(v.r + v.d), c.Y + (int)Math.Round(-v.r + v.d));
+    private static CellPos ToCell(CellPos c, (double r, double d) v)
+        => new(c.X + (int)Math.Round(v.r + v.d), c.Y + (int)Math.Round(-v.r + v.d));
 
+    /// <summary>
+    /// A closed cliff loop round <paramref name="outline"/> and every copy of it. Copy t is the
+    /// canonical outline mapped through <paramref name="images"/> and moved so its centre lands on
+    /// <paramref name="imageCentre"/>(t). The inside becomes an unreachable plateau top. All copies
+    /// or none.
+    /// </summary>
+    private bool TryPlaceClosedCliff(ConnectedTileType cliffType, CellPos centre, List<(double r, double d)> outline, int floodLimit,
+        Symmetry images, Func<int, CellPos> imageCentre, bool keepRoutes)
+    {
         var canonicalVertices = outline.Select(v => ToCell(centre, v)).ToList();
 
         int planSeed = rng.Next();
         var results = new List<(ConnectedTilePlan plan, HashSet<CellPos> cliffCells, HashSet<CellPos> top)>();
         var claimed = new HashSet<CellPos>();
 
-        for (int t = 0; t < terrain.Order; t++)
+        for (int t = 0; t < images.Order; t++)
         {
-            var imageCentre = terrain.Apply(t, centre);
-            var vertices = OrderCounterClockwise(canonicalVertices.Select(v => terrain.Apply(t, v)).ToList());
+            var at = imageCentre(t);
+            var mapped = images.Apply(t, centre);
+            var vertices = OrderCounterClockwise(canonicalVertices.Select(v =>
+            {
+                var q = images.Apply(t, v);
+                return new CellPos(q.X + at.X - mapped.X, q.Y + at.Y - mapped.Y);
+            }).ToList());
 
-            bool Valid(CellPos p) => IsUsable(p) && map.IsInLocal(p, 2) && zone[p.X, p.Y] == Zone.Free && !claimed.Contains(p) && !OnLane(p)
-                                     && !NearProtected(p, 3);
+            // Scenery stays off every lane (free terrain); tactical cliffs only keep the routes to the
+            // centre and to teammates open, since cutting the direct line to the enemy is their purpose.
+            bool Valid(CellPos p) => IsUsable(p) && map.IsInLocal(p, 2) && zone[p.X, p.Y] == Zone.Free && !claimed.Contains(p)
+                                     && (keepRoutes ? !OnRoute(p) : !OnLane(p)) && !NearProtected(p, 3);
 
             if (!vertices.All(Valid))
+            {
+                var bad = vertices.First(v => !Valid(v));
+                lastCliffFailure = "vertex " + (!IsUsable(bad) ? "unusable" : !map.IsInLocal(bad, 2) ? "edge" : zone[bad.X, bad.Y] != Zone.Free ? zone[bad.X, bad.Y].ToString()
+                    : claimed.Contains(bad) ? "claimed" : keepRoutes && OnRoute(bad) ? "route" : OnLane(bad) ? "lane" : "protected");
                 return false;
+            }
 
             // The planner occasionally closes a loop the wrong way round (cliffs facing inwards);
             // retry from another starting vertex before giving up on this plateau.
             ConnectedTilePlan plan = null;
             HashSet<CellPos> cliffCells = null, top = null;
-            for (int retry = 0; retry < Math.Min(4, vertices.Count) && plan == null; retry++)
+            string why = "";
+            // Which way round a loop raises its inside depends on the cliff set (the urban stone set is
+            // the mirror of the regular one). Each set is tried the way that worked last time first.
+            bool reversed = cliffLoopReversed.GetValueOrDefault(cliffType.IniName);
+            for (int retry = 0; retry < Math.Min(4, vertices.Count) * 2 && plan == null; retry++)
             {
-                var rotated = vertices.Skip(retry).Concat(vertices.Take(retry)).ToList();
+                bool flip = retry >= Math.Min(4, vertices.Count);
+                var order = reversed != flip ? Enumerable.Reverse(vertices).ToList() : vertices;
+                int shift = retry % Math.Min(4, vertices.Count);
+                var rotated = order.Skip(shift).Concat(order.Take(shift)).ToList();
                 var result = ConnectedTilePlanner.Plan(cliffType, rotated, ConnectedTileSide.Front, planSeed + retry,
                     useEndPieces: false, closed: true, Valid);
                 if (!result.Success)
+                {
+                    why = "planner " + result.Status;
                     continue;
+                }
 
                 var cells = FoundationCells(result.Plan.Placements);
-                var inside = FloodInside(imageCentre, cells, (int)(Math.PI * rx * ry * 4) + 80);
-                if (inside == null || inside.Count < 6 || CountWrongWayCliffCells(result.Plan, inside, cells) > 0)
+                var inside = FloodInside(at, cells, floodLimit);
+                if (inside == null || inside.Count < 6)
+                {
+                    why = "inside";
                     continue;
+                }
+                if (CountWrongWayCliffCells(result.Plan, inside, cells) > 0)
+                {
+                    why = "wrong way";
+                    continue;
+                }
+                if (keepRoutes && inside.Any(OnRoute))
+                {
+                    why = "inside on route";
+                    continue;
+                }
 
                 (plan, cliffCells, top) = (result.Plan, cells, inside);
+                cliffLoopReversed[cliffType.IniName] = reversed != flip;
             }
 
             if (plan == null)
+            {
+                lastCliffFailure = "no plan: " + why;
                 return false;
+            }
 
             claimed.UnionWith(cliffCells);
             claimed.UnionWith(top);
@@ -219,6 +288,156 @@ internal sealed partial class GenerationRun
         return true;
     }
 
+    // ---------------------------------------------------------------- tactical cliffs
+
+    /// <summary>
+    /// Cliffs laid out along each player's route to the centre: a gateway (ridges either side of the
+    /// route) and an overlook (a ramped plateau beside the route, ramp towards the owner). Each copy
+    /// follows its own player's (possibly drifted) start, so it stays in front of that base.
+    /// </summary>
+    private string lastCliffFailure;
+
+    /// <summary>Per cliff set: whether closed loops must run clockwise on screen to raise their inside.</summary>
+    private readonly Dictionary<string, bool> cliffLoopReversed = new();
+
+    private void PlaceTacticalCliffs(ConnectedTileType cliffType, double amount)
+    {
+        bool debug = Environment.GetEnvironmentVariable("MAPGEN_DEBUG") == "1";
+        // Ramps use the "Slope Set Pieces", which only fit the regular cliff set.
+        bool ramps = cliffType.IniName == "CliffSet";
+        int perPlayer = (int)Math.Round(Math.Clamp(amount, 0, 1) * 2);
+
+        for (int k = 0; k < canonicalStarts.Count; k++)
+        {
+            // The overlook goes first: it sits nearer the base, and the gateway then finds room beyond it.
+            var kinds = new List<bool>(); // true = gateway, false = overlook
+            if (perPlayer >= 2)
+            {
+                if (ramps)
+                    kinds.Add(false);
+                kinds.Add(true);
+            }
+            else if (perPlayer == 1)
+                kinds.Add(!ramps || rng.NextDouble() < 0.5);
+
+            foreach (bool gateway in kinds)
+            {
+                var reasons = new Dictionary<string, int>();
+                bool ok = false;
+                for (int attempt = 0; attempt < 40 && !ok; attempt++)
+                {
+                    lastCliffFailure = "precheck";
+                    ok = gateway ? TryPlaceGateway(cliffType, k) : TryPlaceOverlook(cliffType, k);
+                    if (!ok)
+                        reasons[lastCliffFailure] = reasons.GetValueOrDefault(lastCliffFailure) + 1;
+                }
+                if (debug)
+                    Console.Error.WriteLine($"TACTICAL player {k} {(gateway ? "gateway" : "overlook")}: {(ok ? "ok" : "FAILED")} {string.Join(", ", reasons.Select(r => $"{r.Key} x{r.Value}"))}");
+            }
+        }
+    }
+
+    /// <summary>Unit direction and length of canonical player <paramref name="k"/>'s route to the centre.</summary>
+    private (CellPos Start, double Ux, double Uy, double Length) Route(int k)
+    {
+        var start = canonicalStarts[k];
+        var c = MapCentre();
+        double dx = c.X - start.X, dy = c.Y - start.Y, len = Math.Max(1, Math.Sqrt(dx * dx + dy * dy));
+        return (start, dx / len, dy / len, len);
+    }
+
+    /// <summary>Copy t of a point laid out for player k: the mirrored point, moved with that copy's start.</summary>
+    private Func<int, CellPos> WithStart(int k, CellPos canonical) => t =>
+    {
+        var m = sym.Apply(t, canonical);
+        var (dx, dy) = Drift(sym.Apply(t, canonicalStarts[k]));
+        return new CellPos(m.X + dx, m.Y + dy);
+    };
+
+    /// <summary>
+    /// Two ridges across the route to the centre with the route itself open between them. One side
+    /// alone is kept too (a flank wall) if the other will not fit.
+    /// </summary>
+    private bool TryPlaceGateway(ConnectedTileType cliffType, int k)
+    {
+        var (start, ux, uy, len) = Route(k);
+        double scale = IsBlitz ? 0.75 : 1.0;
+        // Shorter than scenic ridges: the pair plus the gap has to fit between a base and its teammate.
+        // Thick enough for the chunkier cliff sets (urban stone) to close a loop.
+        double rx = (4 + rng.NextDouble() * 3.5) * scale, ry = 3.5 + rng.NextDouble() * 1.0;
+        // Far enough out that the ridges clear the base and its 3-cell margin, and short of the centre
+        // by the ridge thickness plus room for the centre feature. Short routes get no gateway.
+        double nearest = BaseRadius + 9, furthest = len - ry * 1.414 * 1.15 - 8;
+        if (furthest < nearest)
+            return false;
+        // Nearer the base more often than not: a wall in front of the base reads as its gateway, a
+        // wall at the centre as a fortress.
+        double bias = rng.NextDouble();
+        double along = nearest + bias * bias * (furthest - nearest);
+        // The route in screen steps (r right, d down) is ((ux - uy) / 2, (ux + uy) / 2); the ridge's long
+        // axis runs a quarter turn from it, straight across the route.
+        double rotation = Math.Atan2(ux + uy, ux - uy) + Math.PI / 2;
+        double halfGap = 5 + rng.NextDouble() * 2.5;
+        // Ridge half-length in cells (a screen step is sqrt(2) cells, outlines scale up to 1.15).
+        double offset = halfGap + rx * 1.414 * 1.1;
+        var outline = PlateauOutline(rx, ry, rotation);
+        int floodLimit = (int)(Math.PI * rx * ry * 4) + 80;
+
+        bool any = false;
+        foreach (int side in new[] { -1, 1 })
+        {
+            var centre = new CellPos(
+                (int)Math.Round(start.X + ux * along - uy * side * offset),
+                (int)Math.Round(start.Y + uy * along + ux * side * offset));
+            if (!IsUsable(centre) || zone[centre.X, centre.Y] != Zone.Free)
+                continue;
+            if (TryPlaceClosedCliff(cliffType, centre, outline, floodLimit, sym, WithStart(k, centre), keepRoutes: true))
+                any = true;
+        }
+        return any;
+    }
+
+    /// <summary>A ramped plateau beside the route to the centre, its ramp facing the owner's base.</summary>
+    private bool TryPlaceOverlook(ConnectedTileType cliffType, int k)
+    {
+        var (start, ux, uy, len) = Route(k);
+        double scale = IsBlitz ? 0.8 : 1.0;
+        // At least 7: the 8-cell ramp gap has to fit in an edge with a cliff piece either side.
+        int hx = (int)Math.Round((7 + rng.Next(0, 2)) * scale), hy = (int)Math.Round((7 + rng.Next(0, 2)) * scale);
+        int h = Math.Max(hx, hy);
+        // Clear of the route by the box half extent plus the ramp and its foot, which face the route:
+        // units come up from the corridor, and the top looks down on it.
+        double offset = h + 7;
+        // The nearest corner of the box must clear the base and its 3-cell margin; the far side must
+        // stay clear of the centre. Short routes get no overlook.
+        double nearest = h + Math.Sqrt(Math.Max(0, (BaseRadius + 4) * (BaseRadius + 4) - (offset - h) * (offset - h)));
+        double furthest = len - h - 6;
+        if (furthest < nearest)
+        {
+            lastCliffFailure = "short route";
+            return false;
+        }
+        double along = nearest + rng.NextDouble() * Math.Min(10, furthest - nearest);
+        var onRoute = new CellPos((int)Math.Round(start.X + ux * along), (int)Math.Round(start.Y + uy * along));
+
+        // Either side of the route, in random order: near the map edge only one of them has room.
+        int first = rng.Next(2) == 0 ? -1 : 1;
+        foreach (int side in new[] { first, -first })
+        {
+            var centre = new CellPos(
+                (int)Math.Round(start.X + ux * along - uy * side * offset),
+                (int)Math.Round(start.Y + uy * along + ux * side * offset));
+            if (!IsUsable(centre) || zone[centre.X, centre.Y] != Zone.Free)
+            {
+                lastCliffFailure = !IsUsable(centre) ? "centre unusable" : "centre " + zone[centre.X, centre.Y];
+                continue;
+            }
+            if (TryPlaceRampedBox(cliffType, centre, hx, hy, towards: onRoute, WithStart(k, centre), keepRoutes: true))
+                return true;
+        }
+        return false;
+    }
+
     // ---------------------------------------------------------------- plateaus with a ramp
 
     /// <summary>
@@ -248,6 +467,16 @@ internal sealed partial class GenerationRun
 
         // The ramp faces the nearest base or the map centre.
         var towards = rng.NextDouble() < 0.6 ? players.OrderBy(p => p.Position.DistanceTo(centre)).First().Position : MapCentre();
+        return TryPlaceRampedBox(cliffType, centre, hx, hy, towards, t => Image(t, centre), keepRoutes: false);
+    }
+
+    /// <summary>
+    /// The ramped box itself and every copy of it: copy t is the box mapped through the feature
+    /// symmetry and moved so its centre lands on <paramref name="imageCentre"/>(t). All copies or none.
+    /// </summary>
+    private bool TryPlaceRampedBox(ConnectedTileType cliffType, CellPos centre, int hx, int hy, CellPos towards,
+        Func<int, CellPos> imageCentre, bool keepRoutes)
+    {
         int dx = towards.X - centre.X, dy = towards.Y - centre.Y;
         var edge = Math.Abs(dx) > Math.Abs(dy) ? (dx > 0 ? RampEdge.SouthEast : RampEdge.NorthWest)
                                                : (dy > 0 ? RampEdge.SouthWest : RampEdge.NorthEast);
@@ -276,16 +505,17 @@ internal sealed partial class GenerationRun
         for (int t = 0; t < sym.Order; t++)
         {
             // Mirrors and rotations map a box to a box and an edge to an edge, so the ramp is
-            // re-planned on whichever edge it lands on in this image. With asymmetry the whole copy
-            // shifts by the drift at its centre.
-            var shift = Drift(sym.Apply(t, centre));
-            CellPos Shifted(CellPos p) => new(p.X + shift.X, p.Y + shift.Y);
+            // re-planned on whichever edge it lands on in this copy. The whole copy then shifts so its
+            // centre lands where the caller wants it (drift, or in front of a drifted base).
+            var mapped = sym.Apply(t, centre);
+            var at = imageCentre(t);
+            CellPos Shifted(CellPos p) => new(p.X + at.X - mapped.X, p.Y + at.Y - mapped.Y);
             var a = Shifted(sym.Apply(t, boxA));
             var b = Shifted(sym.Apply(t, boxB));
             int x0 = Math.Min(a.X, b.X), x1 = Math.Max(a.X, b.X), y0 = Math.Min(a.Y, b.Y), y1 = Math.Max(a.Y, b.Y);
             var g1 = Shifted(sym.Apply(t, gapA));
             var g2 = Shifted(sym.Apply(t, gapB));
-            var imageCentre = Shifted(sym.Apply(t, centre));
+            var imageCentreCell = at;
 
             RampEdge e;
             if (g1.Y == y1 && g2.Y == y1) e = RampEdge.SouthWest;
@@ -300,21 +530,27 @@ internal sealed partial class GenerationRun
 
             // Counter-clockwise corners on screen: left, bottom, right, top. Edge k joins corner k and k+1.
             var corners = new[] { new CellPos(x0, y1), new CellPos(x1, y1), new CellPos(x1, y0), new CellPos(x0, y0) };
-            int k = e switch { RampEdge.SouthWest => 0, RampEdge.SouthEast => 1, RampEdge.NorthEast => 2, _ => 3 };
+            int kEdge = e switch { RampEdge.SouthWest => 0, RampEdge.SouthEast => 1, RampEdge.NorthEast => 2, _ => 3 };
             // The path starts at the gap end nearer the edge's second corner and ends nearer its first.
-            var (start, end) = g1.DistanceTo(corners[(k + 1) % 4]) < g2.DistanceTo(corners[(k + 1) % 4]) ? (g1, g2) : (g2, g1);
-            var path = new List<CellPos> { start, corners[(k + 1) % 4], corners[(k + 2) % 4], corners[(k + 3) % 4], corners[k], end };
+            var (start, end) = g1.DistanceTo(corners[(kEdge + 1) % 4]) < g2.DistanceTo(corners[(kEdge + 1) % 4]) ? (g1, g2) : (g2, g1);
+            var path = new List<CellPos> { start, corners[(kEdge + 1) % 4], corners[(kEdge + 2) % 4], corners[(kEdge + 3) % 4], corners[kEdge], end };
 
             var (ramp, foot) = RampCells(e, start, end, x0, x1, y0, y1);
 
             bool Valid(CellPos p) => IsUsable(p) && map.IsInLocal(p, 2) && zone[p.X, p.Y] == Zone.Free && !claimed.Contains(p)
-                                     && !NearProtected(p, 3);
+                                     && !(keepRoutes && OnRoute(p)) && !NearProtected(p, 3);
             if (!path.All(Valid) || !ramp.All(Valid) || !foot.All(Valid))
+            {
+                lastCliffFailure = "box invalid";
                 return false;
+            }
 
             var result = ConnectedTilePlanner.Plan(type, path, CliffRamps.SideOf(e), planSeed, useEndPieces: true, closed: false, Valid);
             if (!result.Success)
+            {
+                lastCliffFailure = "no ramp plan";
                 return false;
+            }
             var plan = result.Plan;
             if (!CliffRamps.IsRampPiece(plan.Placements[0].Tile) || !CliffRamps.IsRampPiece(plan.Placements[^1].Tile))
                 return false;
@@ -322,9 +558,14 @@ internal sealed partial class GenerationRun
             var cells = FoundationCells(plan.Placements);
             if (cells.Overlaps(ramp))
                 return false;
-            var top = FloodInside(imageCentre, cells.Concat(ramp).ToHashSet(), (2 * hx + 3) * (2 * hy + 3));
+            var top = FloodInside(imageCentreCell, cells.Concat(ramp).ToHashSet(), (2 * hx + 3) * (2 * hy + 3));
             if (top == null || top.Count < 20)
                 return false;
+            if (keepRoutes && top.Any(OnRoute))
+            {
+                lastCliffFailure = "top on route";
+                return false;
+            }
 
             var cliffOnly = new ConnectedTilePlan(plan.Type, plan.Origin,
                 plan.Placements.Where(pl => !CliffRamps.IsRampPiece(pl.Tile)).ToList(), isClosed: false, usesEndPieces: false);
@@ -334,7 +575,6 @@ internal sealed partial class GenerationRun
             claimed.UnionWith(cells);
             claimed.UnionWith(top);
             claimed.UnionWith(ramp);
-            claimed.UnionWith(foot);
             results.Add((plan, cells, top, ramp, foot));
         }
 
@@ -374,10 +614,6 @@ internal sealed partial class GenerationRun
         return true;
     }
 
-    /// <summary>
-    /// The cells between the two slope pieces' ramp strips (the middle of the ramp) and a few rows of
-    /// ground in front of it, for a gap whose path starts at <paramref name="start"/> and ends at <paramref name="end"/>.
-    /// </summary>
     private static (HashSet<CellPos> Ramp, HashSet<CellPos> Foot) RampCells(RampEdge e, CellPos start, CellPos end, int x0, int x1, int y0, int y1)
     {
         var ramp = new HashSet<CellPos>();

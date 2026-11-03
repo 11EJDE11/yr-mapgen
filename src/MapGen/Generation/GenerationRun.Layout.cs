@@ -211,16 +211,25 @@ internal sealed partial class GenerationRun
                     zone[q.X, q.Y] = Zone.BaseCore;
         }
 
-        // On island layouts lanes over the sea do nothing (the coast is mirrored); on the islands they
-        // keep free cliffs and trees off the routes.
-        if (terrain.Kind == SymmetryKind.None)
-            ReserveLanes();
+        // The routes are always worked out: tactical cliffs are laid out along them. Only free terrain
+        // has to keep its scenery off them (mirrored scenery is fair by construction). On island
+        // layouts lanes over the sea do nothing (the coast is mirrored); on the islands they keep free
+        // cliffs and trees off the routes.
+        ReserveLanes();
+        if (terrain.Kind != SymmetryKind.None)
+            lanes = null;
     }
 
     // Free terrain only: corridors that lakes, closed cliffs and unmirrored trees must leave open.
     private bool[,] lanes;
 
+    // The straight line from each base to the centre: what tactical cliffs must leave open (walls
+    // across the lines to the enemy, and between teammates, are the point of them).
+    private bool[,] routeLines;
+
     private bool OnLane(CellPos p) => lanes != null && map.IsValid(p) && lanes[p.X, p.Y];
+
+    private bool OnRoute(CellPos p) => routeLines != null && map.IsValid(p) && routeLines[p.X, p.Y];
 
     /// <summary>
     /// With free terrain, a lake or cliff could lengthen one player's routes and not their mirror
@@ -231,20 +240,21 @@ internal sealed partial class GenerationRun
     private void ReserveLanes()
     {
         lanes = new bool[map.Span, map.Span];
+        routeLines = new bool[map.Span, map.Span];
         foreach (var pl in players)
         {
             // The ground round each base, where its own fields are, stays clear too.
             foreach (var q in Disk(pl.Position, BaseRadius + 10))
                 if (map.IsValid(q))
                     lanes[q.X, q.Y] = true;
-            Lane(pl.Position, MapCentre());
+            Lane(pl.Position, MapCentre(), route: true);
             foreach (var mate in players.Where(o => o != pl && o.Team == pl.Team))
-                Lane(pl.Position, mate.Position);
+                Lane(pl.Position, mate.Position, route: false);
             foreach (var enemy in players.Where(o => o.Team != pl.Team).OrderBy(o => o.Position.DistanceTo(pl.Position)).Take(2))
-                Lane(pl.Position, enemy.Position);
+                Lane(pl.Position, enemy.Position, route: false);
         }
 
-        void Lane(CellPos from, CellPos to)
+        void Lane(CellPos from, CellPos to, bool route)
         {
             double length = from.DistanceTo(to);
             for (double d = 0; d <= length; d += 0.5)
@@ -252,7 +262,11 @@ internal sealed partial class GenerationRun
                 var c = new CellPos((int)Math.Round(from.X + (to.X - from.X) * d / length), (int)Math.Round(from.Y + (to.Y - from.Y) * d / length));
                 foreach (var q in Disk(c, 2))
                     if (map.IsValid(q))
+                    {
                         lanes[q.X, q.Y] = true;
+                        if (route)
+                            routeLines[q.X, q.Y] = true;
+                    }
             }
         }
     }

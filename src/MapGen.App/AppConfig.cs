@@ -15,7 +15,7 @@ internal sealed class AppConfig
     /// the match format, style and economy, which are a choice rather than a taste.
     /// </summary>
     public List<string> Locked { get; set; }
-    public static readonly string[] DefaultLocked = { "Format", "Style", "Economy" };
+    public static readonly string[] DefaultLocked = { "Format", "Style", "Economy", "Fairness" };
     public GeneratorSettings Settings { get; set; } = new();
 
     private static string FilePath => Path.Combine(

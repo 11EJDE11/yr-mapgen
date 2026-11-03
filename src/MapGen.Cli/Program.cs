@@ -69,9 +69,11 @@ internal static class Program
                 case "economy": settings.Economy = Enum.Parse<EconomyMode>(value, true); break;
                 case "hills": settings.Hills = double.Parse(value, System.Globalization.CultureInfo.InvariantCulture); break;
                 case "cliffs": settings.Cliffs = double.Parse(value, System.Globalization.CultureInfo.InvariantCulture); break;
+                case "cliffstyle": settings.CliffStyle = Enum.Parse<CliffStyle>(value, true); break;
                 case "water": settings.Water = double.Parse(value, System.Globalization.CultureInfo.InvariantCulture); break;
                 case "symmetry": settings.Symmetry = Enum.Parse<SymmetryKind>(value, true); break;
                 case "asymmetry": settings.Asymmetry = double.Parse(value, System.Globalization.CultureInfo.InvariantCulture); break;
+                case "fairness": settings.Fairness = double.Parse(value, System.Globalization.CultureInfo.InvariantCulture); break;
                 case "orefields": settings.OreFieldSize = double.Parse(value, System.Globalization.CultureInfo.InvariantCulture); break;
                 case "gemfields": settings.GemFieldSize = double.Parse(value, System.Globalization.CultureInfo.InvariantCulture); break;
                 case "drills": settings.Drills = double.Parse(value, System.Globalization.CultureInfo.InvariantCulture); break;
@@ -144,8 +146,9 @@ internal static class Program
         Console.WriteLine("yr-mapgen generate [--config settings.json] [--format 1v1|2v2|3v3|4v4|2v2v2v2] [--style standard|blitz]");
         Console.WriteLine("                   [--size small|medium|large] [--theater temperate|snow|urban|newurban|desert|lunar]");
         Console.WriteLine("                   [--resources low|medium|high|veryhigh] [--gems none|perplayer|contested|both]");
-        Console.WriteLine("                   [--economy ore|oilonly|mixed] [--hills|--cliffs|--water 0..1] [--symmetry rotate180|mirrorleftright|mirrortopbottom|quad|diamond|none]");
-        Console.WriteLine("                   [--asymmetry 0..1] [--trees 0..1] [--time day|dusk|night] [--seed N] [--count N] [--out path]");
+        Console.WriteLine("                   [--economy ore|oilonly|mixed] [--hills|--cliffs|--water 0..1] [--cliffstyle mixed|scenic|tactical]");
+        Console.WriteLine("                   [--symmetry rotate180|mirrorleftright|mirrortopbottom|quad|diamond|none]");
+        Console.WriteLine("                   [--asymmetry 0..1] [--fairness 0..1] [--trees 0..1] [--time day|dusk|night] [--seed N] [--count N] [--out path]");
         Console.WriteLine("                   [--game <YR directory>]   (renders the embedded preview with LightningMap)");
     }
 

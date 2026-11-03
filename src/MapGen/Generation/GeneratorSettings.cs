@@ -44,6 +44,21 @@ public enum MapLayout
     Mountainous,
 }
 
+/// <summary>What the cliffs are for.</summary>
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum CliffStyle
+{
+    /// <summary>Chosen per map.</summary>
+    Mixed,
+    /// <summary>Plateaus and ridges placed off the routes: scenery that shapes the paths between them.</summary>
+    Scenic,
+    /// <summary>
+    /// Ridge walls across each player's approach with a gateway on the route, and plateaus beside the
+    /// route with the ramp facing the owner, so the high ground over the corridor can be held.
+    /// </summary>
+    Tactical,
+}
+
 [JsonConverter(typeof(JsonStringEnumConverter))]
 public enum ResourceLevel { Low, Medium, High, VeryHigh }
 
@@ -134,6 +149,8 @@ public sealed class GeneratorSettings
     /// <summary>0..1: cliff plateaus and ridges (some with ramps up, some closed).</summary>
     public double Cliffs { get; set; } = 0.5;
 
+    public CliffStyle CliffStyle { get; set; } = CliffStyle.Mixed;
+
     /// <summary>0..1: lakes on Land maps (share of the map under water); smaller islands on island layouts.</summary>
     public double Water { get; set; } = 0.35;
 
@@ -157,6 +174,17 @@ public sealed class GeneratorSettings
     /// is then enforced by measuring the map and re-rolling.
     /// </summary>
     public double Asymmetry { get; set; } = 0;
+
+    /// <summary>
+    /// 0..1: how strictly the fairness check is applied. 1 is the standard tolerance (about 15% between
+    /// equivalent starts); lower values widen it, up to four times at 0, so asymmetric maps settle on
+    /// a seed sooner at the cost of less equal starts.
+    /// </summary>
+    public double Fairness { get; set; } = 1;
+
+    /// <summary>Multiplier on every fairness tolerance that follows from <see cref="Fairness"/>.</summary>
+    [JsonIgnore]
+    public double FairnessToleranceScale => 1 + 3 * (1 - Math.Clamp(Fairness, 0, 1));
 
     /// <summary>0..1, amount of tree cover used as obstacles.</summary>
     public double Trees { get; set; } = 0.5;

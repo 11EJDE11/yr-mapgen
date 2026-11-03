@@ -16,8 +16,8 @@ internal sealed class MainForm : Form
     private readonly string dataDir = FindDataDirectory();
     private readonly string workDir = Path.Combine(Path.GetTempPath(), "yr-mapgen");
 
-    private ComboBox cbLayout, cbFormat, cbStyle, cbSize, cbShape, cbTheater, cbResources, cbGems, cbEconomy, cbSymmetry, cbTime;
-    private TrackBar tbHills, tbCliffs, tbWater, tbTrees, tbGarrisons, tbOreSize, tbGemSize, tbDrills, tbAsymmetry;
+    private ComboBox cbLayout, cbFormat, cbStyle, cbSize, cbShape, cbTheater, cbResources, cbGems, cbEconomy, cbSymmetry, cbTime, cbCliffStyle;
+    private TrackBar tbHills, tbCliffs, tbWater, tbTrees, tbGarrisons, tbOreSize, tbGemSize, tbDrills, tbAsymmetry, tbFairness;
     private CheckBox chkTrails, chkWalls;
     private NumericUpDown nudSeed;
     private CheckBox chkDefaultTech;
@@ -130,11 +130,13 @@ internal sealed class MainForm : Form
         cbEconomy = EnumCombo<EconomyMode>();
         cbSymmetry = Combo("Auto");
         cbTime = EnumCombo<TimeOfDay>();
+        cbCliffStyle = EnumCombo<CliffStyle>();
         tbHills = Slider();
         tbCliffs = Slider();
         tbWater = Slider();
         tbTrees = Slider();
         tbAsymmetry = Slider();
+        tbFairness = Slider();
         tbGarrisons = Slider();
         tbOreSize = Slider(25, 250);
         tbGemSize = Slider(25, 250);
@@ -151,10 +153,12 @@ internal sealed class MainForm : Form
         Row("Symmetry", "Symmetry", cbSymmetry);
         new ToolTip().SetToolTip(cbSymmetry, "The layout the sides follow (which decides where the teams sit). Use Asymmetry to make the sides differ.");
         Row("Asymmetry", "Asymmetry", tbAsymmetry, "0: every side is an exact copy. Higher: starts, fields, tech and high ground drift off their mirror spots and take their own shapes, and lakes, cliffs and trees are not mirrored at all. Fairness is then checked by measuring, so generation may take more attempts.");
+        Row("Fairness", "Fairness", tbFairness, "How strictly equivalent starts must match (resources in reach, tech distances, buildable area). 100: within about 15%. Lower: up to four times looser, so asymmetric maps settle on a seed sooner.");
         Row("Theater", "Theater", cbTheater);
         Row("Time", "Time of day", cbTime);
         Row("Hills", "Hills", tbHills);
         Row("Cliffs", "Cliffs", tbCliffs);
+        Row("CliffStyle", "Cliff style", cbCliffStyle, "Scenic: plateaus and ridges off the routes. Tactical: ridge walls across each approach with a gateway on the route, and plateaus beside the route with the ramp towards the owner. Mixed: chosen per map.");
         Row("Water", "Water", tbWater);
         Row("Trees", "Tree cover", tbTrees);
         Row("Garrisons", "Garrisons", tbGarrisons);
@@ -372,9 +376,11 @@ internal sealed class MainForm : Form
         cbEconomy.SelectedItem = s.Economy.ToString();
         RefreshSymmetryChoices(s.Symmetry?.ToString());
         cbTime.SelectedItem = s.Time.ToString();
+        cbCliffStyle.SelectedItem = s.CliffStyle.ToString();
         tbTrees.Value = Percent(s.Trees);
         // Settings saved with the old "None" symmetry get the slider that replaced it.
         tbAsymmetry.Value = Percent(s.Symmetry == SymmetryKind.None && s.Asymmetry <= 0 ? 0.6 : s.Asymmetry);
+        tbFairness.Value = Percent(s.Fairness);
         nudSeed.Value = Math.Clamp(s.Seed, 0, (int)nudSeed.Maximum);
         IEnumerable<string> locked = config.Locked ?? (IEnumerable<string>)AppConfig.DefaultLocked;
         foreach (var (key, padlock) in locks)
@@ -413,8 +419,10 @@ internal sealed class MainForm : Form
             Economy = Enum.Parse<EconomyMode>((string)cbEconomy.SelectedItem),
             Symmetry = (string)cbSymmetry.SelectedItem == "Auto" ? null : Enum.Parse<SymmetryKind>((string)cbSymmetry.SelectedItem),
             Time = Enum.Parse<TimeOfDay>((string)cbTime.SelectedItem),
+            CliffStyle = Enum.Parse<CliffStyle>((string)cbCliffStyle.SelectedItem),
             Trees = tbTrees.Value / 100.0,
             Asymmetry = tbAsymmetry.Value / 100.0,
+            Fairness = tbFairness.Value / 100.0,
             Seed = (int)nudSeed.Value,
         };
         if (!chkDefaultTech.Checked)
@@ -643,9 +651,13 @@ internal sealed class MainForm : Form
         // Mirrored maps are the classic look; otherwise anything from a little drift to fully free.
         if (!IsLocked("Asymmetry"))
             tbAsymmetry.Value = r.NextDouble() < 0.4 ? 0 : r.Next(25, 101);
+        // Looser fairness is a deliberate trade, so Random only rolls it a little.
+        if (!IsLocked("Fairness"))
+            tbFairness.Value = r.Next(70, 101);
         Choose("Time", cbTime, Pick("Day", "Day", "Dusk", "Night"));
         Slide("Hills", tbHills, 10, 90);
         Slide("Cliffs", tbCliffs, 15, 95);
+        Choose("CliffStyle", cbCliffStyle, Pick("Mixed", "Mixed", "Scenic", "Tactical"));
         Slide("Water", tbWater, 0, 80);
         Slide("Trees", tbTrees, 20, 85);
         Slide("Garrisons", tbGarrisons, 0, 100);

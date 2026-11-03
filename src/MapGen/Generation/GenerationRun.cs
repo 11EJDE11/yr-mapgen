@@ -79,6 +79,9 @@ internal sealed partial class GenerationRun
 
     private bool IsBlitz => settings.Style == MapStyle.Blitz;
 
+    /// <summary>The cliff style this map uses (Mixed is resolved per map).</summary>
+    private CliffStyle cliffStyle;
+
     private static readonly Dictionary<string, string> StepLabels = new()
     {
         ["CreateMap"] = "creating the map", ["PlaceStarts"] = "placing starts", ["ReserveBases"] = "reserving bases",
@@ -124,8 +127,10 @@ internal sealed partial class GenerationRun
         // Starts meant to be equal: images of one canonical start.
         var equivalent = players.GroupBy(p => p.Canonical).Select(g => g.Select(p => p.Waypoint).ToArray()).ToList();
         FairnessReport report = null;
-        // Drifted copies cannot be exactly equal; allow a little more spread the further they drift.
-        Step("Analyze", () => report = FairnessAnalyzer.Analyze(map, theater, teams, equivalent, expectGroundRoutes: !IsIslandLayout, toleranceScale: 1 + 0.5 * Asym));
+        // Drifted copies cannot be exactly equal; allow a little more spread the further they drift,
+        // on top of whatever strictness the user asked for.
+        Step("Analyze", () => report = FairnessAnalyzer.Analyze(map, theater, teams, equivalent, expectGroundRoutes: !IsIslandLayout,
+            toleranceScale: settings.FairnessToleranceScale * (1 + 0.5 * Asym)));
         report.Problems.InsertRange(0, warnings.Distinct().Select(w => "generator: " + w));
 
         return new GenerationResult
@@ -212,6 +217,9 @@ internal sealed partial class GenerationRun
             driftSeedY = rng.Next();
             turnSeed = rng.Next();
         }
+        cliffStyle = settings.CliffStyle == CliffStyle.Mixed
+            ? (rng.NextDouble() < 0.5 ? CliffStyle.Scenic : CliffStyle.Tactical)
+            : settings.CliffStyle;
 
         int n = map.Span;
         zone = new Zone[n, n];
@@ -481,7 +489,7 @@ internal sealed partial class GenerationRun
         map.Name = settings.Name ?? $"[{players.Count}] Generated {settings.FormatLabel}{(IsBlitz ? " Blitz" : "")} #{seed}";
         map.ExtraBasic["GeneratorSeed"] = seed.ToString();
         // Invariant so the same seed writes the same file on every machine (no "0,5" on German Windows).
-        map.ExtraBasic["GeneratorSettings"] = FormattableString.Invariant($"{settings.Format};{settings.Style};{settings.Size};{settings.Resources};{settings.Gems};{settings.Economy};hills {settings.Hills:0.##};cliffs {settings.Cliffs:0.##};water {settings.Water:0.##};asymmetry {settings.Asymmetry:0.##};{sym.Kind}{(terrain.Kind == SymmetryKind.None ? " (terrain free)" : "")}");
+        map.ExtraBasic["GeneratorSettings"] = FormattableString.Invariant($"{settings.Format};{settings.Style};{settings.Size};{settings.Resources};{settings.Gems};{settings.Economy};hills {settings.Hills:0.##};cliffs {settings.Cliffs:0.##} {cliffStyle};water {settings.Water:0.##};asymmetry {settings.Asymmetry:0.##};fairness {settings.Fairness:0.##};{sym.Kind}{(terrain.Kind == SymmetryKind.None ? " (terrain free)" : "")}");
 
         AddTeamMappings();
         ApplyLighting();

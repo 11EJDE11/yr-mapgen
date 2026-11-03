@@ -36,8 +36,10 @@ yr-mapgen analyze "Maps/Yuri's Revenge/tourofegypt.map"
 | `--layout` | `land`, `continent`, `teamislands`, `playerislands`, `archipelago`, `mountainous` |
 | `--symmetry` | 1v1: `rotate180`, `mirrorleftright`, `mirrortopbottom`. Team formats: those plus `quad`. 2v2v2v2: `quad`, `diamond`. Any: `none` |
 | `--asymmetry` | 0..1. 0: exact copies. Higher: each side's starts, fields, tech and high ground drift off their mirror spots and take their own shapes; scenery is not mirrored. Fairness is enforced by measuring |
+| `--fairness` | 0..1. How strictly equivalent starts must match: 1 = within about 15%, 0 = four times looser (asymmetric maps settle sooner) |
 | `--theater` | `temperate`, `snow`, `urban`, `newurban`, `desert`, `lunar` |
 | `--hills`, `--cliffs`, `--water`, `--trees` | 0..1 |
+| `--cliffstyle` | `mixed` (per map), `scenic` (plateaus off the routes), `tactical` (ridge walls with a gateway across each approach, ramped plateaus beside the route facing the owner) |
 | `--resources` | `low`, `medium`, `high`, `veryhigh` |
 | `--orefields`, `--gemfields` | size multiplier (1 = default) |
 | `--drills` | share of ore fields with an ore drill (default 0.85) |
