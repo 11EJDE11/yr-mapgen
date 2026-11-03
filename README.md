@@ -12,7 +12,7 @@ Yuri's Revenge folder. No .NET install needed.
 
 - All settings, Generate / Random, zoomable preview, fairness report.
 - Random rolls every setting that is not locked. The padlock next to a setting keeps it: lock
-  "Gem fields %" at 200 and press Random for any map with big gem fields. Format, style and
+  "Gem fields %" at 200 and press Random for any map with big gem fields. Format and
   economy start locked. An unlocked seed is re-rolled on every Generate.
 - The Yuri's Revenge folder is needed for previews and "Copy to Maps\Custom". Saved in
   `%AppData%\yr-mapgen\settings.json`.
@@ -30,7 +30,6 @@ yr-mapgen analyze "Maps/Yuri's Revenge/tourofegypt.map"
 | Option | Values |
 |---|---|
 | `--format` | `1v1`, `2v2`, `3v3`, `4v4`, `2v2v2v2` |
-| `--style` | `standard`, `blitz` (smaller map, tighter bases, no secondary fields) |
 | `--size` | `small`, `medium`, `large` (±8% area) |
 | `--shape` | `random`, `wide`, `square`, `tall` |
 | `--layout` | `land`, `continent`, `teamislands`, `playerislands`, `archipelago`, `mountainous` |

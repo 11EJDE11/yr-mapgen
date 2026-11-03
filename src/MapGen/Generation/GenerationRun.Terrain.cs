@@ -13,6 +13,11 @@ internal sealed partial class GenerationRun
 
     private HeightField heights;
 
+    /// <summary>Reachable raised ground (ramped plateau tops, terraces with a way up): where a reward is worth holding.</summary>
+    private bool[,] highGround;
+
+    private bool OnHighGround(CellPos p) => highGround != null && map.IsValid(p) && highGround[p.X, p.Y];
+
     private const int PlateauHeight = 4;
 
     private static readonly Dictionary<string, string[]> CliffTypesByTheater = new(StringComparer.OrdinalIgnoreCase)
@@ -34,6 +39,7 @@ internal sealed partial class GenerationRun
     private void PlanTerrain()
     {
         targetLevel = new int[map.Span, map.Span];
+        highGround = new bool[map.Span, map.Span];
 
         bool mountainous = settings.Layout == MapLayout.Mountainous;
         double cliffs = mountainous ? Math.Max(settings.Cliffs, 0.9) : settings.Cliffs;
@@ -85,7 +91,7 @@ internal sealed partial class GenerationRun
         if (cliffStyle == CliffStyle.Terraced)
             scenic *= 0.15;
 
-        int target = (int)Math.Round(scenic * CanonicalUsableCells / (IsBlitz ? 700.0 : 520.0));
+        int target = (int)Math.Round(scenic * CanonicalUsableCells / 520.0);
         target = Math.Max(1, target);
         int placed = 0;
 
@@ -121,7 +127,7 @@ internal sealed partial class GenerationRun
 
         // Half extents in screen-space "right" (1,-1) and "down" (1,1) steps, plus a rotation so
         // ridges can run diagonally.
-        double scale = IsBlitz ? 0.75 : 1.0;
+        double scale = 1.0;
         double rx, ry;
         if (ridge)
         {
@@ -371,7 +377,7 @@ internal sealed partial class GenerationRun
     private bool TryPlaceGateway(ConnectedTileType cliffType, int k)
     {
         var (start, ux, uy, len) = Route(k);
-        double scale = IsBlitz ? 0.75 : 1.0;
+        double scale = 1.0;
         // Shorter than scenic ridges: the pair plus the gap has to fit between a base and its teammate.
         // Thick enough for the chunkier cliff sets (urban stone) to close a loop.
         double rx = (4 + rng.NextDouble() * 3.5) * scale, ry = 3.5 + rng.NextDouble() * 1.0;
@@ -411,7 +417,7 @@ internal sealed partial class GenerationRun
     private bool TryPlaceOverlook(ConnectedTileType cliffType, int k)
     {
         var (start, ux, uy, len) = Route(k);
-        double scale = IsBlitz ? 0.8 : 1.0;
+        double scale = 1.0;
         // At least 7: the 8-cell ramp gap has to fit in an edge with a cliff piece either side.
         int hx = (int)Math.Round((7 + rng.Next(0, 2)) * scale), hy = (int)Math.Round((7 + rng.Next(0, 2)) * scale);
         int h = Math.Max(hx, hy);
@@ -461,7 +467,7 @@ internal sealed partial class GenerationRun
         if (!IsUsable(centre) || !sym.IsCanonical(centre) || zone[centre.X, centre.Y] != Zone.Free)
             return false;
 
-        double scale = IsBlitz ? 0.8 : 1.0;
+        double scale = 1.0;
         int hx = (int)Math.Round((6 + rng.Next(0, 4)) * scale), hy = (int)Math.Round((6 + rng.Next(0, 4)) * scale);
         double extent = Math.Sqrt(hx * hx + hy * hy) + 6;
 
@@ -604,6 +610,7 @@ internal sealed partial class GenerationRun
                     continue;
                 targetLevel[p.X, p.Y] = PlateauHeight;
                 zone[p.X, p.Y] = Zone.Free;
+                highGround[p.X, p.Y] = true;
             }
 
             // The gap: raised to the plateau level and left for the height field to slope down.
@@ -690,11 +697,11 @@ internal sealed partial class GenerationRun
         int maxLevel = 1 + (int)Math.Round(amount * 2);
         double threshold = 0.6 - 0.2 * amount;
         int seed = rng.Next();
-        double large = IsBlitz ? 20 : 30, small = IsBlitz ? 10 : 14;
+        double large = 30, small = 14;
 
         foreach (var p in map.AllValidCells())
         {
-            if (!IsUsable(p) || zone[p.X, p.Y] is not (Zone.Free or Zone.Open))
+            if (!IsUsable(p) || zone[p.X, p.Y] is not (Zone.Free or Zone.Open or Zone.Base))
                 continue;
 
             // Hills decide where buildings fit and who has the high ground, so they follow the feature
@@ -710,9 +717,10 @@ internal sealed partial class GenerationRun
             if (level == 0)
                 continue;
 
-            // Slopes run one level per cell: keep raised ground that far from bases and cliffs, and the
-            // centre flat for the centre building.
-            if (NearZone(p, level + 2, Zone.Base, Zone.BaseCore) || NearZone(p, level + 1, Zone.Cliff, Zone.CliffTop, Zone.Water)
+            // Slopes run one level per cell. Hills may run through the base (buildings go up on them),
+            // but the core round the start stays flat for the construction yard, and so do cliff feet
+            // and the centre for the centre building.
+            if (NearZone(p, level + 2, Zone.BaseCore) || NearZone(p, level + 1, Zone.Cliff, Zone.CliffTop, Zone.Water)
                 || p.DistanceTo(MapCentre()) < level + 6)
                 continue;
 

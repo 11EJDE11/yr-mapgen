@@ -106,7 +106,7 @@ public sealed class MapGenerator
             progress?.Invoke("Every attempt failed; trying a new set of seeds");
             var again = new GeneratorSettings
             {
-                Seed = unchecked(settings.Seed * 7 + 1000003), Theater = settings.Theater, Format = settings.Format, Style = settings.Style,
+                Seed = unchecked(settings.Seed * 7 + 1000003), Theater = settings.Theater, Format = settings.Format,
                 Size = settings.Size, Shape = settings.Shape, Layout = settings.Layout, Resources = settings.Resources, Gems = settings.Gems,
                 OreFieldSize = settings.OreFieldSize, GemFieldSize = settings.GemFieldSize, Drills = settings.Drills, Economy = settings.Economy,
                 Hills = settings.Hills, Cliffs = settings.Cliffs, CliffStyle = settings.CliffStyle, Water = settings.Water, Garrisons = settings.Garrisons,

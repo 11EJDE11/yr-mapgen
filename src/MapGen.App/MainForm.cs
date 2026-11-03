@@ -16,7 +16,7 @@ internal sealed class MainForm : Form
     private readonly string dataDir = FindDataDirectory();
     private readonly string workDir = Path.Combine(Path.GetTempPath(), "yr-mapgen");
 
-    private ComboBox cbLayout, cbFormat, cbStyle, cbSize, cbShape, cbTheater, cbResources, cbGems, cbEconomy, cbSymmetry, cbTime, cbCliffStyle;
+    private ComboBox cbLayout, cbFormat, cbSize, cbShape, cbTheater, cbResources, cbGems, cbEconomy, cbSymmetry, cbTime, cbCliffStyle;
     private TrackBar tbHills, tbCliffs, tbWater, tbTrees, tbGarrisons, tbOreSize, tbGemSize, tbDrills, tbAsymmetry, tbFairness;
     private CheckBox chkTrails, chkWalls;
     private NumericUpDown nudSeed;
@@ -120,7 +120,6 @@ internal sealed class MainForm : Form
         }
 
         cbFormat = Combo("1v1", "2v2", "3v3", "4v4", "2v2v2v2");
-        cbStyle = EnumCombo<MapStyle>();
         cbSize = EnumCombo<MapSize>();
         cbShape = EnumCombo<MapShape>();
         cbLayout = EnumCombo<MapLayout>();
@@ -146,7 +145,6 @@ internal sealed class MainForm : Form
         nudSeed = new NumericUpDown { Minimum = 0, Maximum = int.MaxValue / 2 };
 
         Row("Format", "Format", cbFormat);
-        Row("Style", "Style", cbStyle);
         Row("Size", "Size", cbSize);
         Row("Shape", "Shape", cbShape);
         Row("Layout", "Layout", cbLayout);
@@ -275,7 +273,7 @@ internal sealed class MainForm : Form
         };
 
         // With default tech selected, the grid shows what will be used for the current format.
-        foreach (var cb in new[] { cbFormat, cbStyle, cbEconomy })
+        foreach (var cb in new[] { cbFormat, cbEconomy })
             cb.SelectedIndexChanged += (_, _) => { if (chkDefaultTech.Checked) OnDefaultTechChanged(); };
         cbFormat.SelectedIndexChanged += (_, _) => RefreshSymmetryChoices((string)cbSymmetry.SelectedItem);
     }
@@ -357,7 +355,6 @@ internal sealed class MainForm : Form
     {
         var s = config.Settings ?? new GeneratorSettings();
         cbFormat.SelectedIndex = (int)s.Format;
-        cbStyle.SelectedItem = s.Style.ToString();
         cbSize.SelectedItem = s.Size.ToString();
         cbShape.SelectedItem = s.Shape.ToString();
         cbLayout.SelectedItem = s.Layout.ToString();
@@ -390,7 +387,7 @@ internal sealed class MainForm : Form
         chkReport.Checked = config.ShowReport;
         previewSplit.Panel2Collapsed = !config.ShowReport;
 
-        FillTechGrid(s.Tech ?? new GeneratorSettings { Format = s.Format, Style = s.Style, Economy = s.Economy }.EffectiveTech());
+        FillTechGrid(s.Tech ?? new GeneratorSettings { Format = s.Format, Economy = s.Economy }.EffectiveTech());
         chkDefaultTech.Checked = config.DefaultTech || s.Tech == null;
         OnDefaultTechChanged();
     }
@@ -400,7 +397,6 @@ internal sealed class MainForm : Form
         var s = new GeneratorSettings
         {
             Format = (MatchFormat)cbFormat.SelectedIndex,
-            Style = Enum.Parse<MapStyle>((string)cbStyle.SelectedItem),
             Size = Enum.Parse<MapSize>((string)cbSize.SelectedItem),
             Theater = Theaters[cbTheater.SelectedIndex],
             Shape = Enum.Parse<MapShape>((string)cbShape.SelectedItem),
@@ -635,7 +631,6 @@ internal sealed class MainForm : Form
         // Format first: the symmetry choices and default tech depend on it.
         if (!IsLocked("Format"))
             cbFormat.SelectedIndex = r.Next(cbFormat.Items.Count);
-        Choose("Style", cbStyle, Pick("Standard", "Standard", "Standard", "Blitz"));
         Choose("Economy", cbEconomy, Pick("Ore", "Ore", "Ore", "Ore", "Mixed", "OilOnly"));
         Choose("Size", cbSize, Pick("Small", "Medium", "Medium", "Large"));
         Choose("Shape", cbShape, Pick("Random", "Random", "Random", "Wide", "Square", "Tall"));
@@ -683,7 +678,6 @@ internal sealed class MainForm : Form
     private List<TechRule> RandomTech(Random r)
     {
         var economy = (EconomyMode)cbEconomy.SelectedIndex;
-        bool blitz = (MapStyle)cbStyle.SelectedIndex == MapStyle.Blitz;
         var list = new List<TechRule>();
 
         int ownOil = economy switch
@@ -701,8 +695,8 @@ internal sealed class MainForm : Form
         if (sharedOil > 0)
             list.Add(new TechRule { Type = "oil", Placement = TechPlacement.Contested, Count = sharedOil });
 
-        // Up to two other buildings (fewer on Blitz maps); only one can stand in the centre.
-        var extras = new[] { "repair", "hospital", "airport", "machineshop", "power", "seclab" }.OrderBy(_ => r.Next()).Take(r.Next(blitz ? 0 : 1, blitz ? 2 : 3));
+        // Up to two other buildings; only one can stand in the centre.
+        var extras = new[] { "repair", "hospital", "airport", "machineshop", "power", "seclab" }.OrderBy(_ => r.Next()).Take(r.Next(1, 3));
         bool centreTaken = false;
         bool teams = (MatchFormat)cbFormat.SelectedIndex != MatchFormat.Duel;
         foreach (var type in extras)

@@ -58,7 +58,6 @@ internal static class Program
                         new JsonSerializerOptions { PropertyNameCaseInsensitive = true, ReadCommentHandling = JsonCommentHandling.Skip });
                     break;
                 case "format": settings.Format = ParseFormat(value); break;
-                case "style": settings.Style = Enum.Parse<MapStyle>(value, true); break;
                 case "size": settings.Size = Enum.Parse<MapSize>(value, true); break;
                 case "shape": settings.Shape = Enum.Parse<MapShape>(value, true); break;
                 case "layout": settings.Layout = Enum.Parse<MapLayout>(value, true); break;
@@ -143,7 +142,7 @@ internal static class Program
     private static void PrintUsage()
     {
         Console.WriteLine("yr-mapgen analyze <map>...");
-        Console.WriteLine("yr-mapgen generate [--config settings.json] [--format 1v1|2v2|3v3|4v4|2v2v2v2] [--style standard|blitz]");
+        Console.WriteLine("yr-mapgen generate [--config settings.json] [--format 1v1|2v2|3v3|4v4|2v2v2v2]");
         Console.WriteLine("                   [--size small|medium|large] [--theater temperate|snow|urban|newurban|desert|lunar]");
         Console.WriteLine("                   [--resources low|medium|high|veryhigh] [--gems none|perplayer|contested|both]");
         Console.WriteLine("                   [--economy ore|oilonly|mixed] [--hills|--cliffs|--water 0..1] [--cliffstyle mixed|scenic|tactical|terraced]");

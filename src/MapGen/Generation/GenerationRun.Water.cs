@@ -167,12 +167,12 @@ internal sealed partial class GenerationRun
         {
             int count = settings.Layout == MapLayout.Archipelago ? 3 + rng.Next(3) : 1 + rng.Next(2);
             for (int i = 0; i < count; i++)
-                islets.Add((PickContestedPoint(BaseRadius + 14), 5 + rng.NextDouble() * (IsBlitz ? 3 : 5)));
+                islets.Add((PickContestedPoint(BaseRadius + 14), 5 + rng.NextDouble() * 5));
             islets.Add((MapCentre(), 6 + rng.NextDouble() * 5));
         }
 
         // Island size shrinks as the water slider rises.
-        double islandPad = (IsBlitz ? 7 : 11) * (1.3 - 0.6 * water);
+        double islandPad = 11 * (1.3 - 0.6 * water);
 
         // Inland lakes: the slider is the share of the map under water (up to ~30%), so the noise
         // threshold is taken from the noise values' own distribution.

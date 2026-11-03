@@ -689,6 +689,9 @@ internal sealed partial class GenerationRun
             targetLevel[p.X, p.Y] = PlateauHeight;
             if (zone[p.X, p.Y] == Zone.Free)
                 zone[p.X, p.Y] = reachable ? Zone.Free : Zone.CliffTop;
+            // A terrace nobody starts on is a prize; a base shelf is just home.
+            if (reachable && !hasBase)
+                highGround[p.X, p.Y] = true;
         }
         foreach (var p in allRamp)
         {

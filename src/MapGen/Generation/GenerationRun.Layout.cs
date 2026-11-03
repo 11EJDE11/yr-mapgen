@@ -4,9 +4,9 @@ namespace MapGen.Generation;
 
 internal sealed partial class GenerationRun
 {
-    private double BaseCoreRadius => IsBlitz ? 6 : 7;
-    private double BaseRadius => IsBlitz ? 10 : 13;
-    private double MinStartSeparation => IsBlitz ? 17 : 22;
+    private double BaseCoreRadius => 7;
+    private double BaseRadius => 13;
+    private double MinStartSeparation => 22;
 
     /// <summary>
     /// A start template: a range in normalised LocalSize coordinates for the side on the left

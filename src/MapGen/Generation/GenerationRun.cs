@@ -77,8 +77,6 @@ internal sealed partial class GenerationRun
         rng = new Random(seed);
     }
 
-    private bool IsBlitz => settings.Style == MapStyle.Blitz;
-
     /// <summary>The cliff style this map uses (Mixed is resolved per map).</summary>
     private CliffStyle cliffStyle;
 
@@ -156,7 +154,7 @@ internal sealed partial class GenerationRun
         var styleRng = new Random(unchecked(seed * 31 + 7));
         double styleRoll = styleRng.NextDouble();
         cliffStyle = settings.CliffStyle == CliffStyle.Mixed
-            ? (styleRoll < 0.5 ? CliffStyle.Terraced : styleRoll < 0.75 ? CliffStyle.Scenic : CliffStyle.Tactical)
+            ? (styleRoll < 0.65 ? CliffStyle.Terraced : styleRoll < 0.85 ? CliffStyle.Tactical : CliffStyle.Scenic)
             : settings.CliffStyle;
         if (cliffStyle == CliffStyle.Terraced)
         {
@@ -181,8 +179,6 @@ internal sealed partial class GenerationRun
         // Island layouts lose space to the sea.
         if (settings.Layout is MapLayout.TeamIslands or MapLayout.PlayerIslands or MapLayout.Archipelago or MapLayout.Continent)
             scale *= 1.15;
-        if (IsBlitz)
-            scale *= 0.7;
         // Raised bases sit on plateaus inside the map, so the map grows to keep the same room between them.
         if (cliffStyle == CliffStyle.Terraced && terraceShape == TerraceShape.Highland)
             scale *= 1.2;
@@ -500,11 +496,11 @@ internal sealed partial class GenerationRun
 
         map.MinPlayers = 2;
         map.MaxPlayers = players.Count;
-        map.GameMode = IsBlitz ? "Blitz" : "Standard";
-        map.Name = settings.Name ?? $"[{players.Count}] Generated {settings.FormatLabel}{(IsBlitz ? " Blitz" : "")} #{seed}";
+        map.GameMode = "Standard";
+        map.Name = settings.Name ?? $"[{players.Count}] Generated {settings.FormatLabel} #{seed}";
         map.ExtraBasic["GeneratorSeed"] = seed.ToString();
         // Invariant so the same seed writes the same file on every machine (no "0,5" on German Windows).
-        map.ExtraBasic["GeneratorSettings"] = FormattableString.Invariant($"{settings.Format};{settings.Style};{settings.Size};{settings.Resources};{settings.Gems};{settings.Economy};hills {settings.Hills:0.##};cliffs {settings.Cliffs:0.##} {cliffStyle};water {settings.Water:0.##};asymmetry {settings.Asymmetry:0.##};fairness {settings.Fairness:0.##};{sym.Kind}{(terrain.Kind == SymmetryKind.None ? " (terrain free)" : "")}");
+        map.ExtraBasic["GeneratorSettings"] = FormattableString.Invariant($"{settings.Format};{settings.Size};{settings.Resources};{settings.Gems};{settings.Economy};hills {settings.Hills:0.##};cliffs {settings.Cliffs:0.##} {cliffStyle};water {settings.Water:0.##};asymmetry {settings.Asymmetry:0.##};fairness {settings.Fairness:0.##};{sym.Kind}{(terrain.Kind == SymmetryKind.None ? " (terrain free)" : "")}");
 
         AddTeamMappings();
         ApplyLighting();

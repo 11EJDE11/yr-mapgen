@@ -29,7 +29,7 @@ internal sealed partial class GenerationRun
             _ => (50, 40, 22, 46, 26),
         };
 
-        double scale = IsBlitz ? 0.8 : 1.0;
+        double scale = 1.0;
         if (settings.Economy == EconomyMode.Mixed)
             scale *= 0.7;
         double ore = scale * Math.Clamp(settings.OreFieldSize, 0.25, 4);
@@ -54,32 +54,29 @@ internal sealed partial class GenerationRun
 
         for (int k = 0; k < canonicalStarts.Count; k++)
         {
-            double mainMin = IsBlitz ? 8 : 10, mainMax = IsBlitz ? 10 : 13;
+            double mainMin = 10, mainMax = 13;
             if (!PlacePlayerField(k, gems: false, sizes.Main, mainMin, mainMax, awayBias: 0.6))
                 throw new GenerationFailedException("Could not place a main ore field");
 
-            if (!IsBlitz && settings.Economy == EconomyMode.Ore)
+            if (settings.Economy == EconomyMode.Ore)
                 if (!PlacePlayerField(k, gems: false, sizes.Second, 19, 26, awayBias: 0.0) && !IsIslandLayout)
                     warnings.Add("Could not place a secondary ore field");
 
             if (gemsPerPlayer)
-                if (!PlacePlayerField(k, gems: true, sizes.Gem, IsBlitz ? 14 : 20, IsBlitz ? 19 : 28, awayBias: -0.2)
+                if (!PlacePlayerField(k, gems: true, sizes.Gem, 20, 28, awayBias: -0.2)
                     && !PlacePlayerField(k, gems: true, sizes.Gem, 12, 18, awayBias: 0.3) && !IsIslandLayout)
                     warnings.Add("Could not place a player gem field");
         }
 
-        if (!IsBlitz || settings.Format != MatchFormat.Duel)
-        {
-            if (!PlaceSharedField(gems: false, sizes.Contested, centre: false) && !IsIslandLayout)
-                warnings.Add("Could not place a contested ore field");
-        }
+        if (!PlaceSharedField(gems: false, sizes.Contested, centre: false) && !IsIslandLayout)
+            warnings.Add("Could not place a contested ore field");
 
         if (gemsContested)
         {
             if (!PlaceSharedField(gems: true, sizes.ContestedGem, centre: true) && !IsIslandLayout)
                 warnings.Add("Could not place a centre gem field");
         }
-        else if (!IsBlitz && ZoneAt(MapCentre()) == Zone.Free)
+        else if (ZoneAt(MapCentre()) == Zone.Free)
         {
             if (!PlaceSharedField(gems: false, sizes.Contested, centre: true) && !IsIslandLayout)
                 warnings.Add("Could not place a centre ore field");
@@ -99,13 +96,20 @@ internal sealed partial class GenerationRun
         var away = AwayFromEnemies(k);
         double awayAngle = Math.Atan2(away.Y, away.X);
 
+        // Gems within reach on a plateau top: something to go up for. Tried first when there is any.
+        var highSpots = gems
+            ? Disk(start, maxDist).Where(p => OnHighGround(p) && start.DistanceTo(p) >= minDist && players.All(pl => pl.Position.DistanceTo(p) > BaseRadius + 2)).OrderBy(_ => rng.Next()).Take(20).ToList()
+            : new List<CellPos>();
+
         for (int attempt = 0; attempt < 80; attempt++)
         {
             // awayBias > 0 prefers the back of the base, < 0 the front, 0 anywhere.
             double spread = Math.PI * (1.0 - Math.Abs(awayBias) * 0.6);
             double angle = (awayBias >= 0 ? awayAngle : awayAngle + Math.PI) + (rng.NextDouble() * 2 - 1) * spread;
             double d = minDist + rng.NextDouble() * (maxDist - minDist);
-            var centre = new CellPos(start.X + (int)Math.Round(Math.Cos(angle) * d), start.Y + (int)Math.Round(Math.Sin(angle) * d));
+            var centre = attempt < highSpots.Count
+                ? highSpots[attempt]
+                : new CellPos(start.X + (int)Math.Round(Math.Cos(angle) * d), start.Y + (int)Math.Round(Math.Sin(angle) * d));
 
             if (!IsUsable(centre) || !IsFlatGround(centre))
                 continue;
@@ -191,6 +195,12 @@ internal sealed partial class GenerationRun
 
         if (candidates.Count == 0)
             return MapCentre();
+
+        // Contested ground on reachable high ground is what makes a plateau worth taking: prefer it
+        // when there is any, most of the time.
+        var high = candidates.Where(c => OnHighGround(c.p)).ToList();
+        if (high.Count > 0 && rng.NextDouble() < 0.75)
+            candidates = high;
 
         var top = candidates.OrderBy(c => c.score).Take(8).ToList();
         return top[rng.Next(top.Count)].p;

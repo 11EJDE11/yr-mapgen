@@ -18,9 +18,6 @@ public enum MatchFormat
 }
 
 [JsonConverter(typeof(JsonStringEnumConverter))]
-public enum MapStyle { Standard, Blitz }
-
-[JsonConverter(typeof(JsonStringEnumConverter))]
 public enum MapSize { Small, Medium, Large }
 
 [JsonConverter(typeof(JsonStringEnumConverter))]
@@ -132,7 +129,6 @@ public sealed class GeneratorSettings
     public int Seed { get; set; } = 1;
     public string Theater { get; set; } = "TEMPERATE";
     public MatchFormat Format { get; set; } = MatchFormat.Duel;
-    public MapStyle Style { get; set; } = MapStyle.Standard;
     public MapSize Size { get; set; } = MapSize.Medium;
     public MapShape Shape { get; set; } = MapShape.Random;
     public MapLayout Layout { get; set; } = MapLayout.Land;
@@ -245,12 +241,9 @@ public sealed class GeneratorSettings
 
         list.Add(new TechRule { Type = "oil", Placement = TechPlacement.Contested, Count = 1 });
 
-        if (Style == MapStyle.Standard)
-        {
-            if (Format != MatchFormat.Duel)
-                list.Add(new TechRule { Type = "repair", Placement = TechPlacement.PerTeam, Count = 1 });
-            list.Add(new TechRule { Type = Format == MatchFormat.Duel ? "machineshop" : "hospital", Placement = TechPlacement.Centre, Count = 1 });
-        }
+        if (Format != MatchFormat.Duel)
+            list.Add(new TechRule { Type = "repair", Placement = TechPlacement.PerTeam, Count = 1 });
+        list.Add(new TechRule { Type = Format == MatchFormat.Duel ? "machineshop" : "hospital", Placement = TechPlacement.Centre, Count = 1 });
 
         return list;
     }

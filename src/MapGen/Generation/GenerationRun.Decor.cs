@@ -117,7 +117,7 @@ internal sealed partial class GenerationRun
         if (palette.Count == 0)
             return;
 
-        int perSide = (int)Math.Round(settings.Garrisons * (IsBlitz ? 2 : 4));
+        int perSide = (int)Math.Round(settings.Garrisons * 4);
         int placed = 0;
         for (int attempt = 0; attempt < perSide * 40 && placed < perSide; attempt++)
         {
